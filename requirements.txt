@@ -1,0 +1,5 @@
+streamlit>=1.32
+plotly>=5.19
+click>=8.1
+rich>=13.7
+pydantic>=2.6

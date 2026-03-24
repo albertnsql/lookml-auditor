@@ -1,0 +1,15 @@
+# LookML Auditor — Suppression Rules
+# Place this file in your LookML project root.
+
+suppress:
+  # Example: suppress join integrity for a known cross join
+  # - check: join_integrity
+  #   object: "custom_dimesnion_sos"
+
+  # Example: suppress duplicate warnings for views in multiple envs
+  # - check: duplicate
+  #   pattern: "orderlines"
+
+suppress_checks:
+  # Uncomment to suppress globally:
+  # - field_documentation
