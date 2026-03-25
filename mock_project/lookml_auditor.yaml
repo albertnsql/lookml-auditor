@@ -1,15 +1,20 @@
-# LookML Auditor — Suppression Rules
-# Place this file in your LookML project root.
+# lookml_auditor.yaml — suppression rules for mock_lookml_project
+#
+# Use this file to suppress known false positives without modifying validator code.
+# Supported keys: check, object, pattern, file
+#
+# suppress_checks: globally disables an entire check category.
+# suppress: suppresses individual issues by object name, glob pattern, or file.
+
+# Example: suppress field_documentation globally (too noisy in legacy folder)
+# suppress_checks:
+#   - field_documentation
 
 suppress:
-  # Example: suppress join integrity for a known cross join
-  # - check: join_integrity
-  #   object: "custom_dimesnion_sos"
+  # Suppress the duplicate sql_table_name warning for the known legacy overlap
+  - check: duplicate_tables
+    object: "orders_v1"
 
-  # Example: suppress duplicate warnings for views in multiple envs
-  # - check: duplicate
-  #   pattern: "orderlines"
-
-suppress_checks:
-  # Uncomment to suppress globally:
-  # - field_documentation
+  # Suppress all checks for the legacy folder
+  # - file: "legacy_*.view.lkml"
+  #   check: "*"
