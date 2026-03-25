@@ -248,7 +248,7 @@ with st.sidebar:
     src_mode = st.radio("source_mode", ["📁  Local Folder", "🐙  GitHub URL"],
                         label_visibility="collapsed", key="sb_src_mode", horizontal=True)
 
-    default_path = str(Path(__file__).parent / "mock_project")
+    default_path = ""
 
     if src_mode == "📁  Local Folder":
         sb_path_val = st.session_state.get("sb_path_val", default_path)
@@ -346,8 +346,13 @@ if run_btn:
                     _run_audit(local_path, tmp_dir=tmp_root)
                     st.rerun()
             else:
-                _run_audit(project_path)
-                st.rerun()
+                if not project_path.strip():
+                    st.error("Please enter a local folder path.")
+                elif not Path(project_path.strip()).is_dir():
+                    st.error(f"Project path does not exist or is not a directory: {project_path}")
+                else:
+                    _run_audit(project_path)
+                    st.rerun()
         except Exception as e:
             st.error(f"❌ {e}")
             import traceback; st.code(traceback.format_exc())
@@ -429,6 +434,7 @@ if st.session_state.audit_result is None:
 
         lp_run = st.button("▶  Run Audit", use_container_width=True, key="landing_run")
         st.markdown('</div>', unsafe_allow_html=True)  # close landing-card
+        
 
         if lp_run:
             with st.spinner("Parsing & analysing — may take a moment for large repos..."):
@@ -442,8 +448,13 @@ if st.session_state.audit_result is None:
                             _run_audit(local_path, tmp_dir=tmp_root)
                             st.rerun()
                     else:
-                        _run_audit(lp_path)
-                        st.rerun()
+                        if not lp_path.strip():
+                            st.error("Please enter a local folder path.")
+                        elif not Path(lp_path.strip()).is_dir():
+                            st.error(f"Project path does not exist or is not a directory: {lp_path}")
+                        else:
+                            _run_audit(lp_path)
+                            st.rerun()
                 except Exception as e:
                     st.error(f"❌ {e}")
                     import traceback; st.code(traceback.format_exc())
@@ -469,6 +480,7 @@ if st.session_state.audit_result is None:
                 f"line-height:1.6;'>{text}</span></div>",
                 unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
+        
 
         # ── Privacy statement ────────────────────────────────
         st.markdown('<div class="landing-card">', unsafe_allow_html=True)
@@ -488,6 +500,7 @@ if st.session_state.audit_result is None:
             "</div>",
             unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
+        
 
     st.stop()
 
@@ -559,7 +572,7 @@ with fc3:
     if st.button("✕ Reset", use_container_width=True):
         st.session_state["_do_reset"] = True
         st.rerun()
-st.markdown('</div>', unsafe_allow_html=True)
+
 
 folder_active  = "All Folders"  not in sel_folders  and len(sel_folders)  > 0
 explore_active = "All Explores" not in sel_explores and len(sel_explores) > 0
