@@ -279,12 +279,13 @@ with st.sidebar:
     st.markdown('<div class="section-header">Audit Source</div>', unsafe_allow_html=True)
     if "sb_src_mode" not in st.session_state:
         st.session_state["sb_src_mode"] = "🐙  GitHub URL"
-    src_mode = st.radio("source_mode", ["📁  Local Folder", "🐙  GitHub URL"],
-                        label_visibility="collapsed", key="sb_src_mode", horizontal=True)
+    src_mode = st.radio("source_mode", ["🐙  GitHub URL", "🤐  Upload ZIP", "💻  Local Folder (Desktop Only)"],
+                        label_visibility="collapsed", key="sb_src_mode", horizontal=False)
 
     default_path = ""
 
-    if src_mode == "📁  Local Folder":
+    if src_mode == "💻  Local Folder (Desktop Only)":
+        st.info("ℹ️ This option only works if you are running `streamlit run dashboard.py` locally on your own computer.")
         sb_path_val = st.session_state.get("sb_path_val", default_path)
         project_path = st.text_input(
             "path", value=sb_path_val,
@@ -293,6 +294,15 @@ with st.sidebar:
             key="sb_path_input",
         )
         github_url   = ""
+        gh_subfolder = ""
+
+    elif src_mode == "🤐  Upload ZIP":
+        st.markdown(
+            "<div style='font-family:JetBrains Mono,monospace;font-size:11px;color:#7B8FAE;"
+            "margin-bottom:6px;'>LookML ZIP File</div>", unsafe_allow_html=True)
+        sb_uploaded_zip = st.file_uploader("Upload ZIP", type=["zip"], label_visibility="collapsed", key="sb_zip")
+        project_path = ""
+        github_url = ""
         gh_subfolder = ""
 
     else:  # GitHub URL
@@ -393,6 +403,13 @@ if run_btn:
                     local_path, tmp_root = _handle_zip_upload(sb_uploaded_zip)
                     _run_audit(local_path, tmp_dir=tmp_root)
                     st.rerun()
+            elif src_mode == "🤐  Upload ZIP":
+                if sb_uploaded_zip is None:
+                    st.error("Please upload a .zip file.")
+                else:
+                    local_path, tmp_root = _handle_zip_upload(sb_uploaded_zip)
+                    _run_audit(local_path, tmp_dir=tmp_root)
+                    st.rerun()
             else:
                 if not project_path.strip():
                     st.error("Please enter a local folder path.")
@@ -450,10 +467,11 @@ if st.session_state.audit_result is None:
         if "lp_src_mode" not in st.session_state:
             st.session_state["lp_src_mode"] = "🐙  GitHub URL"
         lp_mode = st.radio(
-            "lp_mode", ["📁  Local Folder", "🐙  GitHub URL"],
+            "lp_mode", ["🐙  GitHub URL", "🤐  Upload ZIP", "💻  Local Folder (Desktop Only)"],
             label_visibility="collapsed", key="lp_src_mode", horizontal=True)
 
-        if lp_mode == "📁  Local Folder":
+        if lp_mode == "💻  Local Folder (Desktop Only)":
+            st.info("ℹ️ This option only works if you are running `streamlit run dashboard.py` locally on your own computer.")
             lp_path_val = st.session_state.get("lp_path_val", default_path)
             lp_path = st.text_input(
                 "lp_path", value=lp_path_val,
@@ -461,6 +479,11 @@ if st.session_state.audit_result is None:
                 placeholder="C:\\Users\\you\\your-looker-repo",
                 key="landing_path_input",
             )
+            lp_gh_url = ""
+            lp_gh_sub = ""
+        elif lp_mode == "🤐  Upload ZIP":
+            lp_uploaded_zip = st.file_uploader("Upload LookML ZIP", type=["zip"], label_visibility="collapsed", key="landing_zip")
+            lp_path = ""
             lp_gh_url = ""
             lp_gh_sub = ""
         else:
@@ -493,6 +516,13 @@ if st.session_state.audit_result is None:
                         else:
                             local_path, tmp_root = _clone_github_repo(
                                 lp_gh_url.strip(), lp_gh_sub.strip())
+                            _run_audit(local_path, tmp_dir=tmp_root)
+                            st.rerun()
+                    elif lp_mode == "🤐  Upload ZIP":
+                        if lp_uploaded_zip is None:
+                            st.error("Please upload a .zip file.")
+                        else:
+                            local_path, tmp_root = _handle_zip_upload(lp_uploaded_zip)
                             _run_audit(local_path, tmp_dir=tmp_root)
                             st.rerun()
                     elif lp_mode == "🤐  Upload ZIP":
