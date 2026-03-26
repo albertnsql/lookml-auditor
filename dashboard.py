@@ -12,7 +12,7 @@ Case 8 : Folder picker — tkinter (Windows/Linux) / osascript (Mac),
          banner + fallback to text input if unavailable
 """
 from __future__ import annotations
-import sys, os, json, shutil, subprocess, tempfile, platform, zipfile, zipfile
+import sys, os, json, shutil, subprocess, tempfile, platform, zipfile
 from collections import Counter
 from pathlib import Path
 
@@ -31,7 +31,8 @@ from reporting import build_json_report
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="LookML Auditor", page_icon="🔍",
                    layout="wide", initial_sidebar_state="expanded")
-st.markdown("""
+if "_styles_injected" not in st.session_state:
+    st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -61,6 +62,7 @@ st.markdown("""
   .gh-input-wrap{background:#0F1628;border:1px solid #1E2D4A;border-radius:8px;padding:14px 16px;margin-bottom:10px;}
 </style>
 """, unsafe_allow_html=True)
+    st.session_state["_styles_injected"] = True
 
 
 # ─────────────────────────────────────────────────────────────
@@ -233,7 +235,7 @@ def _handle_zip_upload(uploaded_file) -> tuple[str, str]:
 
 # Cached parse
 # ─────────────────────────────────────────────────────────────
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def _parse_only(path: str):
     return parse_project(path)
 
@@ -632,12 +634,12 @@ st.sidebar.download_button(
 # ─────────────────────────────────────────────────────────────
 # Global Filters
 # ─────────────────────────────────────────────────────────────
-all_folders       = sorted({Path(v.source_file).parent.name
-                             for v in project.views if v.source_file})
+all_models        = sorted({Path(e.source_file).stem.replace(".model", "")
+                             for e in project.explores if e.source_file})
 all_explore_names = sorted({e.name for e in project.explores})
 
-fold_default = (["All Folders"]  if st.session_state.pop("_reset_fold", False)
-                else st.session_state.get("folder_filter",  ["All Folders"]))
+fold_default = (["All Models"]   if st.session_state.pop("_reset_fold", False)
+                else st.session_state.get("folder_filter",  ["All Models"]))
 exp_default  = (["All Explores"] if st.session_state.pop("_reset_exp",  False)
                 else st.session_state.get("explore_filter", ["All Explores"]))
 
@@ -645,9 +647,9 @@ st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
 fc1, fc2, fc3 = st.columns([3, 3, 1])
 with fc1:
     st.markdown('<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:#7B8FAE;'
-                'letter-spacing:.1em;text-transform:uppercase;">Filter by Folder</span>',
+                'letter-spacing:.1em;text-transform:uppercase;">Filter by Model</span>',
                 unsafe_allow_html=True)
-    sel_folders = st.multiselect("f", options=["All Folders"] + all_folders,
+    sel_folders = st.multiselect("f", options=["All Models"] + all_models,
                                   default=fold_default,
                                   label_visibility="collapsed", key="folder_filter")
 with fc2:
@@ -666,7 +668,7 @@ with fc3:
         st.rerun()
 
 
-folder_active  = "All Folders"  not in sel_folders  and len(sel_folders)  > 0
+folder_active  = "All Models"   not in sel_folders  and len(sel_folders)  > 0
 explore_active = "All Explores" not in sel_explores and len(sel_explores) > 0
 
 
@@ -675,7 +677,10 @@ explore_active = "All Explores" not in sel_explores and len(sel_explores) > 0
 # ─────────────────────────────────────────────────────────────
 filtered_views = [
     v for v in project.views
-    if not folder_active or Path(v.source_file).parent.name in sel_folders
+    if not folder_active or (
+        v.source_file and
+        Path(v.source_file).stem.replace(".model", "") in sel_folders
+    )
 ]
 filtered_explores = [
     e for e in project.explores
