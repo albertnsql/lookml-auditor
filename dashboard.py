@@ -713,7 +713,7 @@ with col_t:
     src_badge = ""
     if result.get("tmp_dir"):
         src_badge = ('<span style="margin-left:8px;font-family:JetBrains Mono,monospace;'
-                     'font-size:11px;color:#818CF8;background:#1a1a3a;border:1px solid #3a3a6a;'
+                     'font-size:11px;color:#4A9EFF;background:#1A2438;border:1px solid #1E2D4A;'
                      'border-radius:4px;padding:3px 8px;">🐙 GitHub</span>')
     fb = ('<span style="margin-left:8px;font-family:JetBrains Mono,monospace;font-size:11px;'
           'color:#fbbf24;background:#2e251018;border:1px solid #4a3a1844;'
@@ -722,7 +722,7 @@ with col_t:
     st.markdown(
         f"<div style='padding:8px 0;'>"
         f"<span style='font-family:JetBrains Mono,monospace;font-size:22px;font-weight:700;"
-        f"color:#e2e8f0;'>{project.name}</span>"
+        f"color:#E2E8F0;'>{project.name}</span>"
         f"<span style='margin-left:12px;font-family:JetBrains Mono,monospace;font-size:11px;"
         f"color:{score_color};background:{score_color}18;border:1px solid {score_color}44;"
         f"border-radius:4px;padding:3px 8px;'>{score_label}</span>{fb}{src_badge}</div>",
@@ -901,7 +901,8 @@ ra1.metric("Health Score", f"{filtered_score}/100",
                "Penalty: errors×8 (max 70) + warnings×3 (max 15) + info×0.1 (max 5). "
                "Proportional to repo size — a large repo with few issues scores high."
            ))
-_kpi_with_detail(ra2, "Total Issues", len(filtered_issues_all), all_issue_objs)
+_kpi_with_detail(ra2, "Total Issues", len(filtered_issues_all), all_issue_objs,
+                 help_text="Total number of issues (errors + warnings + info) across all validators in the current filter.")
 ra3.metric("Views",   f"{len(filtered_views):,}",
            help="Number of LookML view blocks in the current filter.")
 ra4.metric("Explores", f"{len(filtered_explores):,}",
@@ -917,8 +918,10 @@ st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
 
 rb1, rb2, rb3, rb4, rb5, rb6, rb7 = st.columns(7)
 
-_kpi_with_detail(rb1, "Errors",   len(error_issues),   error_objects,   color="#ef4444")
-_kpi_with_detail(rb2, "Warnings", len(warning_issues), warning_objects, color="#fbbf24")
+_kpi_with_detail(rb1, "Errors",   len(error_issues),   error_objects,   color="#ef4444",
+                 help_text="Critical issues that will break Looker queries or model compilation at runtime.")
+_kpi_with_detail(rb2, "Warnings", len(warning_issues), warning_objects, color="#fbbf24",
+                 help_text="Non-blocking issues that may confuse end-users or indicate poor model hygiene.")
 _kpi_with_detail(rb3, "Orphan Views",    orphan_view_count, orphan_in_filter, color="#fbbf24",
                  help_text="Views not joined into any explore. Invisible to end users.")
 _kpi_with_detail(rb4, "Zombie Explores", zombie_exp_count,  zombie_in_filter, color="#ef4444",
@@ -1008,12 +1011,12 @@ with tab_ov:
             st.markdown(_card(cat.value, len(ci), e, w, inf), unsafe_allow_html=True)
 
     st.markdown(
-        "<div style='font-family:JetBrains Mono,monospace;font-size:10px;color:#94A3B8;"
+        "<div style='font-family:JetBrains Mono,monospace;font-size:10px;color:#7B8FAE;"
         "margin-top:12px;line-height:1.8;'>"
-        "<b style='color:#60A5FA;'>Broken Reference</b> — Explores/joins pointing to missing views &nbsp;|&nbsp; "
-        "<b style='color:#60A5FA;'>Duplicate Definition</b> — Same view/explore/field/SQL/table in 2+ places &nbsp;|&nbsp; "
-        "<b style='color:#60A5FA;'>Join Integrity</b> — Missing sql_on · bad field refs · missing relationship &nbsp;|&nbsp; "
-        "<b style='color:#60A5FA;'>Field Quality</b> — Missing PKs · orphaned views · missing labels/descriptions"
+        "<b style='color:#4A9EFF;'>Broken Reference</b> — Explores/joins pointing to missing views &nbsp;|&nbsp; "
+        "<b style='color:#4A9EFF;'>Duplicate Definition</b> — Same view/explore/field/SQL/table in 2+ places &nbsp;|&nbsp; "
+        "<b style='color:#4A9EFF;'>Join Integrity</b> — Missing sql_on · bad field refs · missing relationship &nbsp;|&nbsp; "
+        "<b style='color:#4A9EFF;'>Field Quality</b> — Missing PKs · orphaned views · missing labels/descriptions"
         "</div>", unsafe_allow_html=True)
 
 
