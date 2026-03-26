@@ -31,8 +31,7 @@ from reporting import build_json_report
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="LookML Auditor", page_icon="🔍",
                    layout="wide", initial_sidebar_state="expanded")
-if "_styles_injected" not in st.session_state:
-    st.markdown("""
+st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -62,7 +61,6 @@ if "_styles_injected" not in st.session_state:
   .gh-input-wrap{background:#0F1628;border:1px solid #1E2D4A;border-radius:8px;padding:14px 16px;margin-bottom:10px;}
 </style>
 """, unsafe_allow_html=True)
-    st.session_state["_styles_injected"] = True
 
 
 # ─────────────────────────────────────────────────────────────
