@@ -12,7 +12,7 @@ Case 8 : Folder picker — tkinter (Windows/Linux) / osascript (Mac),
          banner + fallback to text input if unavailable
 """
 from __future__ import annotations
-import sys, os, json, shutil, subprocess, tempfile, platform
+import sys, os, json, shutil, subprocess, tempfile, platform, zipfile
 from collections import Counter
 from pathlib import Path
 
@@ -197,6 +197,23 @@ def _kpi_with_detail(col, label, value, detail_items, color="#e2e8f0", help_text
 
 
 # ─────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
+# Case X — ZIP Upload helper
+# ─────────────────────────────────────────────────────────────
+def _handle_zip_upload(uploaded_file) -> tuple[str, str]:
+    """Extract zip to temp dir and return (extracted_path, tmp_root)."""
+    tmp_root = tempfile.mkdtemp(prefix="lookml_audit_zip_")
+    with zipfile.ZipFile(uploaded_file, 'r') as zf:
+        zf.extractall(tmp_root)
+    # Check if the zip contains a single root folder
+    items = os.listdir(tmp_root)
+    if len(items) == 1 and Path(tmp_root, items[0]).is_dir():
+        extracted_path = str(Path(tmp_root, items[0]))
+    else:
+        extracted_path = tmp_root
+    return extracted_path, tmp_root
+
 # Cached parse
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
@@ -345,6 +362,13 @@ if run_btn:
                         github_url.strip(), gh_subfolder.strip())
                     _run_audit(local_path, tmp_dir=tmp_root)
                     st.rerun()
+            elif src_mode == "🤐  Upload ZIP":
+                if sb_uploaded_zip is None:
+                    st.error("Please upload a .zip file.")
+                else:
+                    local_path, tmp_root = _handle_zip_upload(sb_uploaded_zip)
+                    _run_audit(local_path, tmp_dir=tmp_root)
+                    st.rerun()
             else:
                 if not project_path.strip():
                     st.error("Please enter a local folder path.")
@@ -445,6 +469,13 @@ if st.session_state.audit_result is None:
                         else:
                             local_path, tmp_root = _clone_github_repo(
                                 lp_gh_url.strip(), lp_gh_sub.strip())
+                            _run_audit(local_path, tmp_dir=tmp_root)
+                            st.rerun()
+                    elif lp_mode == "🤐  Upload ZIP":
+                        if lp_uploaded_zip is None:
+                            st.error("Please upload a .zip file.")
+                        else:
+                            local_path, tmp_root = _handle_zip_upload(lp_uploaded_zip)
                             _run_audit(local_path, tmp_dir=tmp_root)
                             st.rerun()
                     else:
