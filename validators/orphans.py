@@ -25,7 +25,14 @@ def check_orphans(project: LookMLProject) -> list[Issue]:
         for join in exp.joins:
             referenced_views.add(join.resolved_view)
 
-    # Orphaned views — exist in project but never referenced by any explore
+    # Case 3: Views used via extends: are referenced (not orphans)
+    extended_views: set[str] = set()
+    for view in project.views:
+        for ext_name in view.extends:
+            extended_views.add(ext_name)
+    referenced_views.update(extended_views)
+
+    # Orphaned views — exist in project but never referenced by any explore or extends
     for view in project.views:
         if view.name not in referenced_views:
             issues.append(Issue(
@@ -38,6 +45,25 @@ def check_orphans(project: LookMLProject) -> list[Issue]:
                 line_number=view.line_number,
                 suggestion=(
                     f"Add '{view.name}' to an explore or remove it if it is no longer needed."
+                ),
+            ))
+        elif view.name in extended_views and view.name not in {
+            ref for exp in project.explores
+            for ref in ([exp.base_view] + [j.resolved_view for j in exp.joins])
+        }:
+            # View is used via extends but not directly joined — flag as info
+            issues.append(Issue(
+                category=IssueCategory.FIELD_QUALITY,
+                severity=Severity.INFO,
+                message=(
+                    f"View '{view.name}' is used via extends (not directly joined into an explore)"
+                ),
+                object_type="view",
+                object_name=view.name,
+                source_file=view.source_file,
+                line_number=view.line_number,
+                suggestion=(
+                    f"This view is extended by another view — this is expected LookML behavior."
                 ),
             ))
 

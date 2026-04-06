@@ -25,6 +25,7 @@ class LookMLView(BaseModel):
     name: str
     sql_table_name: Optional[str] = None
     derived_table_sql: Optional[str] = None
+    extends: list[str] = Field(default_factory=list)
     fields: list[LookMLField] = Field(default_factory=list)
     source_file: str = ""
     line_number: int = 0
@@ -63,6 +64,7 @@ class LookMLJoin(BaseModel):
     type: Optional[str] = None
     relationship: Optional[str] = None
     sql_on: Optional[str] = None
+    sql_where: Optional[str] = None
     foreign_key: Optional[str] = None
     source_file: str = ""
     line_number: int = 0

@@ -26,6 +26,7 @@ _RE_COMMENT       = re.compile(r'#[^\n]*')
 _RE_VIEW_BLOCK    = re.compile(r'^\s*view\s*:\s*\S+\s*\{',     re.MULTILINE)
 _RE_EXPLORE_BLOCK = re.compile(r'^\s*explore\s*:\s*\S+\s*\{',  re.MULTILINE)
 _RE_ANON_DT       = re.compile(r'^\s*derived_table\s*:\s*\{',  re.MULTILINE)
+_RE_EXTENDS       = re.compile(r'extends\s*:\s*\[([^\]]+)\]')
 
 _FIELD_TYPE_PATTERNS = {
     ft: re.compile(rf'^\s*{ft}\s*:\s*\S+\s*\{{', re.MULTILINE)
@@ -164,6 +165,13 @@ def _parse_view(block_text: str, line_num: int, source_file: str) -> Optional[Lo
 
     sql_table = _get_attr(block_text, "sql_table_name")
 
+    # Parse extends: [view_a, view_b]
+    extends: list[str] = []
+    ext_match = _RE_EXTENDS.search(block_text)
+    if ext_match:
+        extends = [v.strip().strip('"').strip("'") for v in ext_match.group(1).split(',')]
+        extends = [v for v in extends if v]
+
     # derived_table: { sql: ... ;; } — try named then anonymous blocks
     derived_sql = None
     dt_blocks = _extract_named_blocks(block_text, "derived_table") or \
@@ -185,6 +193,7 @@ def _parse_view(block_text: str, line_num: int, source_file: str) -> Optional[Lo
         name=name,
         sql_table_name=sql_table,
         derived_table_sql=derived_sql,
+        extends=extends,
         fields=fields,
         source_file=source_file,
         line_number=line_num,
@@ -203,6 +212,7 @@ def _parse_join(block_text: str, line_num: int, source_file: str) -> Optional[Lo
     # Both are valid join conditions — treat equivalently
     sql_on  = (_get_sql_block(block_text, "sql_on") or _get_attr(block_text, "sql_on") or
                _get_sql_block(block_text, "sql")    or _get_attr(block_text, "sql"))
+    sql_where = _get_sql_block(block_text, "sql_where") or _get_attr(block_text, "sql_where")
     from_view = _get_attr(block_text, "from") or _get_attr(block_text, "view_name")
 
     return LookMLJoin(
@@ -211,6 +221,7 @@ def _parse_join(block_text: str, line_num: int, source_file: str) -> Optional[Lo
         type=_get_attr(block_text, "type"),
         relationship=_get_attr(block_text, "relationship"),
         sql_on=sql_on,
+        sql_where=sql_where,
         foreign_key=_get_attr(block_text, "foreign_key"),
         source_file=source_file,
         line_number=line_num,

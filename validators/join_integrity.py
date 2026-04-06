@@ -92,8 +92,27 @@ def _check_join(join: LookMLJoin, explore: LookMLExplore,
     join_type_ci = (join.type or "").lower().strip()
 
     # Case 6: cross joins never need a condition
+    # Case 5 (new): sql_where can act as a join condition — downgrade to warning
     if not join.sql_on and not join.foreign_key:
-        if join_type_ci not in _NO_CONDITION_TYPES:
+        if join.sql_where:
+            # sql_where is present — functional but non-standard join condition
+            issues.append(Issue(
+                category=IssueCategory.JOIN_INTEGRITY,
+                severity=Severity.WARNING,
+                message=(
+                    f"Join '{join.name}' in explore '{explore.name}' "
+                    f"uses sql_where instead of sql_on for its join condition"
+                ),
+                object_type="join",
+                object_name=join.name,
+                source_file=join.source_file,
+                line_number=join.line_number,
+                suggestion=(
+                    "Consider using 'sql_on:' for standard join conditions. "
+                    "'sql_where:' works but is less explicit about the join relationship."
+                ),
+            ))
+        elif join_type_ci not in _NO_CONDITION_TYPES:
             issues.append(Issue(
                 category=IssueCategory.JOIN_INTEGRITY,
                 severity=Severity.ERROR,

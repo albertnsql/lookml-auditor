@@ -117,7 +117,23 @@ def check_duplicates(project: LookMLProject) -> list[Issue]:
     # ── Duplicate fields within a view ───────────────────────────────────
     # Case 2: dimension_group + dimension same base name → WARNING (valid LookML pattern)
     # Pure same-type duplicates → ERROR
+    # Case 4: views using extends can legitimately re-define fields from the base view
+    # Also: skip views whose source file contains multiple view blocks —
+    #        fields may belong to different views within the same file
+    _file_view_count: dict[str, int] = defaultdict(int)
     for view in project.views:
+        if view.source_file:
+            _file_view_count[_full_path_norm(view.source_file)] += 1
+
+    for view in project.views:
+        # If this view uses extends:, skip — field overrides are standard LookML
+        if view.extends:
+            continue
+
+        # If this file has multiple view blocks, skip — fields may span views
+        if view.source_file and _file_view_count.get(_full_path_norm(view.source_file), 0) > 1:
+            continue
+
         field_map: dict[str, list[str]] = defaultdict(list)
         for field in view.fields:
             field_map[field.name].append(field.field_type)

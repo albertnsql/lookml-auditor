@@ -25,7 +25,6 @@ import pandas as pd
 from lookml_parser import parse_project
 from validators import run_all_checks, compute_health_score, compute_category_scores, Severity, IssueCategory
 from validators.suppression import load_suppression_rules, apply_suppressions, EXAMPLE_CONFIG
-from reporting import build_json_report
 
 
 # ─────────────────────────────────────────────────────────────
@@ -215,21 +214,6 @@ def _handle_zip_upload(uploaded_file) -> tuple[str, str]:
     return extracted_path, tmp_root
 
 
-# ─────────────────────────────────────────────────────────────
-# Case X — ZIP Upload helper
-# ─────────────────────────────────────────────────────────────
-def _handle_zip_upload(uploaded_file) -> tuple[str, str]:
-    """Extract zip to temp dir and return (extracted_path, tmp_root)."""
-    tmp_root = tempfile.mkdtemp(prefix="lookml_audit_zip_")
-    with zipfile.ZipFile(uploaded_file, 'r') as zf:
-        zf.extractall(tmp_root)
-    # Check if the zip contains a single root folder
-    items = os.listdir(tmp_root)
-    if len(items) == 1 and Path(tmp_root, items[0]).is_dir():
-        extracted_path = str(Path(tmp_root, items[0]))
-    else:
-        extracted_path = tmp_root
-    return extracted_path, tmp_root
 
 # Cached parse
 # ─────────────────────────────────────────────────────────────
@@ -243,23 +227,21 @@ def _parse_only(path: str):
 # ─────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def _audit_cached(path: str):
-    """Cache the full validator + suppression + report pipeline."""
+    """Cache the full validator + suppression pipeline."""
     _p = _parse_only(path)
     _i = run_all_checks(_p)
     _rules = load_suppression_rules(_p.root_path)
     _i, _suppressed = apply_suppressions(_i, _rules, _p.root_path)
-    _r = build_json_report(_p, _i)
-    return _p, _i, _suppressed, _r
+    return _p, _i, _suppressed
 
 def _run_audit(path: str, tmp_dir: str | None = None):
     """Call cached audit pipeline and store result in session state."""
-    _p, _i, _suppressed, _r = _audit_cached(path)
+    _p, _i, _suppressed = _audit_cached(path)
     st.session_state.audit_result = {
         "project": _p, "issues": _i,
-        "graph": None, "report": _r,
         "suppressed": _suppressed,
         "manifest": _p.manifest_constants,
-        "tmp_dir": tmp_dir,   # for GitHub clone cleanup
+        "tmp_dir": tmp_dir,
     }
 
 
@@ -396,20 +378,6 @@ if run_btn:
                     local_path, tmp_root = _handle_zip_upload(sb_uploaded_zip)
                     _run_audit(local_path, tmp_dir=tmp_root)
                     st.rerun()
-            elif src_mode == "🤐  Upload ZIP":
-                if sb_uploaded_zip is None:
-                    st.error("Please upload a .zip file.")
-                else:
-                    local_path, tmp_root = _handle_zip_upload(sb_uploaded_zip)
-                    _run_audit(local_path, tmp_dir=tmp_root)
-                    st.rerun()
-            elif src_mode == "🤐  Upload ZIP":
-                if sb_uploaded_zip is None:
-                    st.error("Please upload a .zip file.")
-                else:
-                    local_path, tmp_root = _handle_zip_upload(sb_uploaded_zip)
-                    _run_audit(local_path, tmp_dir=tmp_root)
-                    st.rerun()
             else:
                 if not project_path.strip():
                     st.error("Please enter a local folder path.")
@@ -428,21 +396,21 @@ if run_btn:
 # ─────────────────────────────────────────────────────────────
 if st.session_state.audit_result is None:
 
-    # Hero
+    # Hero — compact
     st.markdown(
-        "<div style='text-align:center;padding:40px 0 28px;'>"
-        "<div style='font-family:JetBrains Mono,monospace;font-size:54px;"
-        "color:#4A9EFF;margin-bottom:10px;line-height:1;'>⬡</div>"
-        "<h1 style='font-size:32px;margin:0 0 8px;color:#E2E8F0;"
+        "<div style='text-align:center;padding:16px 0 10px;'>"
+        "<div style='display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:6px;'>"
+        "<span style='font-family:JetBrains Mono,monospace;font-size:36px;"
+        "color:#4A9EFF;line-height:1;'>⬡</span>"
+        "<h1 style='font-size:28px;margin:0;color:#E2E8F0;"
         "font-family:Inter,sans-serif;font-weight:700;letter-spacing:-.5px;'>"
-        "LookML Auditor</h1>"
-        "<p style='color:#7B8FAE;font-size:15px;max-width:520px;margin:0 auto 16px;"
-        "line-height:1.7;font-family:Inter,sans-serif;'>"
-        "Static analysis for your LookML project. Detect broken references, "
-        "duplicate definitions, join integrity issues, and field quality problems — "
-        "all in one dashboard."
+        "LookML Auditor</h1></div>"
+        "<p style='color:#7B8FAE;font-size:13px;max-width:520px;margin:0 auto 8px;"
+        "line-height:1.6;font-family:Inter,sans-serif;'>"
+        "Static analysis for your LookML project — broken references, "
+        "duplicates, join integrity, field quality."
         "</p>"
-        "<div style='margin:0 auto;display:flex;flex-wrap:wrap;justify-content:center;gap:4px;"
+        "<div style='margin:0 auto;display:flex;flex-wrap:wrap;justify-content:center;gap:3px;"
         "max-width:580px;'>"
         "<span class='feature-pill'>🔗 Broken References</span>"
         "<span class='feature-pill'>♊ Duplicates</span>"
@@ -456,6 +424,20 @@ if st.session_state.audit_result is None:
 
     lc1, lc2, lc3 = st.columns([1, 2.4, 1])
     with lc2:
+
+        # ── Privacy banner (compact, highlighted) ─────────
+        st.markdown(
+            "<div style='background:#0d2318;border:1px solid #166534;border-left:4px solid #4ade80;"
+            "border-radius:8px;padding:10px 16px;margin-bottom:10px;"
+            "display:flex;align-items:center;gap:10px;flex-wrap:wrap;'>"
+            "<span style='font-family:Inter,sans-serif;font-size:12px;font-weight:700;"
+            "color:#4ade80;'>🔒 Privacy</span>"
+            "<span style='font-family:Inter,sans-serif;font-size:11px;color:#94A3B8;'>"
+            "Everything runs <b style='color:#4ade80;'>entirely on your machine</b>. "
+            "Nothing is uploaded, stored, or transmitted to any server."
+            "</span></div>",
+            unsafe_allow_html=True)
+
 
         # ── Input card ──────────────────────────────────────
         st.markdown('<div class="landing-card">', unsafe_allow_html=True)
@@ -532,13 +514,6 @@ if st.session_state.audit_result is None:
                             local_path, tmp_root = _handle_zip_upload(lp_uploaded_zip)
                             _run_audit(local_path, tmp_dir=tmp_root)
                             st.rerun()
-                    elif lp_mode == "🤐  Upload ZIP":
-                        if lp_uploaded_zip is None:
-                            st.error("Please upload a .zip file.")
-                        else:
-                            local_path, tmp_root = _handle_zip_upload(lp_uploaded_zip)
-                            _run_audit(local_path, tmp_dir=tmp_root)
-                            st.rerun()
                     else:
                         if not lp_path.strip():
                             st.error("Please enter a local folder path.")
@@ -551,48 +526,16 @@ if st.session_state.audit_result is None:
                     st.error(f"❌ {e}")
                     import traceback; st.code(traceback.format_exc())
 
-        # ── How it works ────────────────────────────────────
-        st.markdown('<br>', unsafe_allow_html=True)
-        st.markdown('<div class="landing-card">', unsafe_allow_html=True)
-        st.markdown(
-            "<div style='font-family:Inter,sans-serif;font-size:13px;font-weight:600;"
-            "color:#E2E8F0;margin-bottom:14px;'>How to use</div>",
-            unsafe_allow_html=True)
-        for step, text in [
-            ("1", "Point to your LookML project — either a local folder or a public GitHub repo URL."),
-            ("2", "Click <b>Run Audit</b>. The tool parses every <code>.lkml</code> file and runs all checks."),
-            ("3", "Explore the dashboard tabs: Overview · Issues · Visualizations · Inventory · File Viewer."),
-            ("4", "Use the global <b>Folder</b> and <b>Explore</b> filters to scope results to any subset."),
-            ("5", "Export issues as CSV. Optionally create a <code>lookml_auditor.yaml</code> to suppress false positives."),
-        ]:
-            st.markdown(
-                f"<div style='display:flex;align-items:flex-start;gap:0;margin-bottom:12px;'>"
-                f"<span class='step-num'>{step}</span>"
-                f"<span style='font-family:Inter,sans-serif;font-size:13px;color:#94A3B8;"
-                f"line-height:1.6;'>{text}</span></div>",
-                unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-
-        # ── Privacy statement ────────────────────────────────
-        st.markdown('<div class="landing-card">', unsafe_allow_html=True)
-        st.markdown(
-            "<div style='display:flex;align-items:center;gap:10px;margin-bottom:10px;'>"
-            "<div style='font-family:Inter,sans-serif;font-size:13px;font-weight:600;"
-            "color:#E2E8F0;'>Privacy &amp; Data Handling</div>"
-            "<span class='privacy-badge'>🔒 In-memory only</span>"
-            "</div>"
-            "<div style='font-family:Inter,sans-serif;font-size:12px;color:#94A3B8;line-height:1.7;'>"
-            "Everything runs <b style='color:#4ade80;'>entirely on your machine</b>. "
-            "Your LookML source files are read locally and analysed in memory — "
-            "<b style='color:#E2E8F0;'>nothing is uploaded, stored, or transmitted</b> to any server. "
-            "When you clone a GitHub repo, it is downloaded to a temporary directory on your "
-            "local machine and deleted when you clear the cache. "
-            "No telemetry, no analytics, no third-party calls beyond loading Google Fonts."
-            "</div>",
-            unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
+        # ── How to Use (collapsible) ──────────────────────
+        with st.expander("📖 How to Use", expanded=False):
+            for step, text in [
+                ("1", "Point to your LookML project — local folder, GitHub URL, or ZIP upload."),
+                ("2", "Click **Run Audit**. The tool parses every `.lkml` file and runs all checks."),
+                ("3", "Explore tabs: Overview · Issues · Visualizations · Inventory · File Viewer."),
+                ("4", "Use **Folder** and **Explore** filters to scope results."),
+                ("5", "Export as CSV. Create `lookml_auditor.yaml` to suppress false positives."),
+            ]:
+                st.markdown(f"**{step}.** {text}")
 
     st.stop()
 
@@ -603,7 +546,6 @@ if st.session_state.audit_result is None:
 result     = st.session_state.audit_result
 project    = result["project"]
 issues     = result["issues"]
-report     = result["report"]
 suppressed = result.get("suppressed", 0)
 manifest   = result.get("manifest", {})
 
@@ -630,11 +572,28 @@ st.sidebar.download_button(
 
 
 # ─────────────────────────────────────────────────────────────
-# Global Filters
+# Global Filters  (Case 1: subfolder hierarchy, Case 2: cascading explore)
 # ─────────────────────────────────────────────────────────────
-all_folders       = sorted({Path(v.source_file).parent.name
-                             for v in project.views if v.source_file})
-all_explore_names = sorted({e.name for e in project.explores})
+_root = Path(project.root_path)
+
+def _rel_dir(source_file: str) -> str:
+    """Get the relative directory path from root for a source file."""
+    try:
+        return str(Path(source_file).parent.relative_to(_root)).replace("\\", "/")
+    except ValueError:
+        return Path(source_file).parent.name
+
+def _file_in_folders(source_file: str, selected: list[str]) -> bool:
+    """Case 1: Check if source_file is inside any selected folder (including subfolders)."""
+    rel = _rel_dir(source_file)
+    for folder in selected:
+        if rel == folder or rel.startswith(folder + "/"):
+            return True
+    return False
+
+# Collect all unique relative directory paths for the folder picker
+all_folders = sorted({_rel_dir(v.source_file) for v in project.views if v.source_file}
+                     | {_rel_dir(e.source_file) for e in project.explores if e.source_file})
 
 fold_default = (["All Folders"]  if st.session_state.pop("_reset_fold", False)
                 else st.session_state.get("folder_filter",  ["All Folders"]))
@@ -650,11 +609,29 @@ with fc1:
     sel_folders = st.multiselect("f", options=["All Folders"] + all_folders,
                                   default=fold_default,
                                   label_visibility="collapsed", key="folder_filter")
+
+folder_active  = "All Folders"  not in sel_folders  and len(sel_folders)  > 0
+
+# Case 2: Cascading explore filter — only show explores from selected folders
+if folder_active:
+    available_explore_names = sorted({
+        e.name for e in project.explores
+        if e.source_file and _file_in_folders(e.source_file, sel_folders)
+    })
+else:
+    available_explore_names = sorted({e.name for e in project.explores})
+
+# Reset explore default if options changed (avoid invalid defaults)
+if folder_active and exp_default != ["All Explores"]:
+    exp_default = [e for e in exp_default if e in available_explore_names or e == "All Explores"]
+    if not exp_default:
+        exp_default = ["All Explores"]
+
 with fc2:
     st.markdown('<span style="font-family:JetBrains Mono,monospace;font-size:11px;color:#7B8FAE;'
                 'letter-spacing:.1em;text-transform:uppercase;">Filter by Explore</span>',
                 unsafe_allow_html=True)
-    sel_explores = st.multiselect("e", options=["All Explores"] + all_explore_names,
+    sel_explores = st.multiselect("e", options=["All Explores"] + available_explore_names,
                                    default=exp_default,
                                    label_visibility="collapsed", key="explore_filter")
 with fc3:
@@ -666,16 +643,15 @@ with fc3:
         st.rerun()
 
 
-folder_active  = "All Folders"  not in sel_folders  and len(sel_folders)  > 0
 explore_active = "All Explores" not in sel_explores and len(sel_explores) > 0
 
 
 # ─────────────────────────────────────────────────────────────
-# Case 2 — Apply filters consistently everywhere
+# Apply filters consistently everywhere (Case 1 subfolder, Case 2 cascade)
 # ─────────────────────────────────────────────────────────────
 filtered_views = [
     v for v in project.views
-    if not folder_active or Path(v.source_file).parent.name in sel_folders
+    if not folder_active or (v.source_file and _file_in_folders(v.source_file, sel_folders))
 ]
 filtered_explores = [
     e for e in project.explores
@@ -687,7 +663,7 @@ _filt_explore_set = {e.name for e in filtered_explores}
 
 def _issue_matches(iss) -> bool:
     if folder_active:
-        if not iss.source_file or Path(iss.source_file).parent.name not in sel_folders:
+        if not iss.source_file or not _file_in_folders(iss.source_file, sel_folders):
             return False
     if explore_active:
         if not any(exp in iss.object_name or exp in iss.message for exp in sel_explores):
@@ -1214,9 +1190,9 @@ with tab_viz:
 # Case 2: all sub-tabs consume filtered_views / filtered_explores
 # ═══════════════════════════════════════════════════════════════
 with tab_inv:
-    inv_subtab_views, inv_subtab_dt, inv_subtab_exp, inv_subtab_joins, inv_subtab_fields = st.tabs([
-        "  Views  ", "  Derived Tables  ", "  Explores  ",
-        "  Join Relationships  ", "  All Fields  "
+    inv_subtab_views, inv_subtab_dt, inv_subtab_dta, inv_subtab_exp, inv_subtab_joins = st.tabs([
+        "  Views  ", "  Derived Tables  ", "  DT Alternatives  ",
+        "  Explores  ", "  Join Relationships  "
     ])
 
     with inv_subtab_views:
@@ -1290,6 +1266,134 @@ with tab_inv:
                 "Source":        Path(e.source_file).name if e.source_file else "",
             })
         st.dataframe(pd.DataFrame(exp_rows), use_container_width=True, hide_index=True)
+
+        # ── Interactive Dependency Graph ───────────────────────────
+        st.markdown('<div class="section-header">Explore → View Dependency Graph</div>',
+                    unsafe_allow_html=True)
+        if filtered_explores:
+            _graph_explore = st.selectbox(
+                "Select Explore",
+                options=[e.name for e in filtered_explores],
+                label_visibility="collapsed",
+                key="dep_graph_explore",
+            )
+            _sel_exp = next((e for e in filtered_explores if e.name == _graph_explore), None)
+            if _sel_exp:
+                import math
+
+                # Build nodes and edges
+                _nodes = []
+                _edges_x, _edges_y = [], []
+                _center_x, _center_y = 0.5, 0.5
+
+                # Base view at center
+                _nodes.append({
+                    "name": _sel_exp.base_view,
+                    "x": _center_x, "y": _center_y,
+                    "type": "base_view",
+                    "color": "#4A9EFF",
+                    "size": 32,
+                    "hover": f"<b>{_sel_exp.base_view}</b><br>Type: Base View<br>Explore: {_sel_exp.name}",
+                })
+
+                # Joined views arranged in a circle
+                n_joins = len(_sel_exp.joins)
+                for idx, j in enumerate(_sel_exp.joins):
+                    angle = (2 * math.pi * idx / max(n_joins, 1)) - math.pi / 2
+                    radius = 0.35
+                    jx = _center_x + radius * math.cos(angle)
+                    jy = _center_y + radius * math.sin(angle)
+
+                    rel = (j.relationship or "undefined").replace("_", " ").title()
+                    jtype = (j.type or "left_outer").replace("_", " ").title()
+                    view_name = j.resolved_view
+                    has_condition = "✓" if j.sql_on else ("⚠ sql_where" if getattr(j, 'sql_where', None) else "❌ Missing")
+
+                    # Color by relationship type
+                    rel_color = {
+                        "Many To One": "#10B981", "One To Many": "#F472B6",
+                        "One To One": "#818CF8", "Many To Many": "#F59E0B",
+                    }.get(rel, "#7B8FAE")
+
+                    _nodes.append({
+                        "name": view_name,
+                        "x": jx, "y": jy,
+                        "type": "join",
+                        "color": rel_color,
+                        "size": 22,
+                        "hover": (
+                            f"<b>{view_name}</b><br>"
+                            f"Join: {j.name}<br>"
+                            f"Type: {jtype}<br>"
+                            f"Relationship: {rel}<br>"
+                            f"Condition: {has_condition}"
+                        ),
+                    })
+
+                    # Edge from center to this node
+                    _edges_x.extend([_center_x, jx, None])
+                    _edges_y.extend([_center_y, jy, None])
+
+                # Build Plotly figure
+                _fig_dep = go.Figure()
+
+                # Edges
+                _fig_dep.add_trace(go.Scatter(
+                    x=_edges_x, y=_edges_y, mode="lines",
+                    line=dict(color="#2E4063", width=2),
+                    hoverinfo="skip",
+                ))
+
+                # Nodes
+                _fig_dep.add_trace(go.Scatter(
+                    x=[n["x"] for n in _nodes],
+                    y=[n["y"] for n in _nodes],
+                    mode="markers+text",
+                    marker=dict(
+                        size=[n["size"] for n in _nodes],
+                        color=[n["color"] for n in _nodes],
+                        line=dict(width=2, color="#141B2D"),
+                        symbol=["diamond" if n["type"] == "base_view" else "circle" for n in _nodes],
+                    ),
+                    text=[n["name"] for n in _nodes],
+                    textposition="top center",
+                    textfont=dict(family="JetBrains Mono", size=10, color="#E2E8F0"),
+                    hovertext=[n["hover"] for n in _nodes],
+                    hoverinfo="text",
+                    hoverlabel=dict(
+                        bgcolor="#1A2438",
+                        bordercolor="#4A9EFF",
+                        font=dict(family="Inter", size=12, color="#E2E8F0"),
+                    ),
+                ))
+
+                _graph_h = max(380, 280 + n_joins * 12)
+                _fig_dep.update_layout(
+                    height=_graph_h,
+                    margin=dict(l=20, r=20, t=30, b=20),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.05, 1.05]),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.05, 1.05]),
+                    showlegend=False,
+                    dragmode="pan",
+                )
+                st.plotly_chart(_fig_dep, use_container_width=True, config={"displayModeBar": False})
+
+                # Legend
+                st.markdown(
+                    "<div style='display:flex;gap:16px;flex-wrap:wrap;justify-content:center;"
+                    "font-family:JetBrains Mono,monospace;font-size:10px;color:#7B8FAE;'>"
+                    "<span>◆ <span style='color:#4A9EFF;'>Base View</span></span>"
+                    "<span>● <span style='color:#10B981;'>Many:1</span></span>"
+                    "<span>● <span style='color:#F472B6;'>1:Many</span></span>"
+                    "<span>● <span style='color:#818CF8;'>1:1</span></span>"
+                    "<span>● <span style='color:#F59E0B;'>Many:Many</span></span>"
+                    "<span>● <span style='color:#7B8FAE;'>Undefined</span></span>"
+                    "</div>",
+                    unsafe_allow_html=True)
+        else:
+            st.info("No explores in current filter.")
 
     with inv_subtab_joins:
         st.markdown('<div class="section-header">Join Relationship Summary</div>',
@@ -1376,30 +1480,184 @@ with tab_inv:
                 st.plotly_chart(_fig_type, use_container_width=True,
                                 config={"displayModeBar": False})
 
-            st.markdown('<div class="section-header">All Joins</div>', unsafe_allow_html=True)
-            _rel_filter = st.multiselect(
-                "Filter by relationship",
-                options=sorted(_df_joins["Relationship"].unique()),
-                default=sorted(_df_joins["Relationship"].unique()),
-                label_visibility="collapsed", key="join_rel_filter")
-            st.dataframe(_df_joins[_df_joins["Relationship"].isin(_rel_filter)],
-                         use_container_width=True, hide_index=True, height=420)
 
-    with inv_subtab_fields:
-        st.markdown('<div class="section-header">All Fields</div>', unsafe_allow_html=True)
-        field_rows = [{
-            "View":        v.name,
-            "Field":       f.name,
-            "Label":       f.label or "⚠ Missing",
-            "Type":        f.field_type,
-            "Data Type":   f.data_type or "—",
-            "Description": f.description or "⚠ Missing",
-            "Primary Key": "✓" if f.primary_key else "",
-            "Hidden":      "yes" if f.hidden else "",
-            "Source":      Path(f.source_file).name if f.source_file else "",
-        } for v in filtered_views for f in v.fields]
-        st.dataframe(pd.DataFrame(field_rows), use_container_width=True,
-                     hide_index=True, height=480)
+    # ── Derived Table Alternatives (new sub-tab) ─────────────────────
+    with inv_subtab_dta:
+        import re as _re_dta
+
+        st.markdown('<div class="section-header">Derived Table Alternatives</div>',
+                    unsafe_allow_html=True)
+        st.caption(
+            "Views using derived_table that could potentially be simplified. "
+            "These are best-practice suggestions, not errors."
+        )
+
+        # ── Analysis helpers ──────────────────────────────────────
+        _RE_SIMPLE_SELECT = _re_dta.compile(
+            r'^\s*SELECT\s+[\w\s,.*`"\[\]]+\s+FROM\s+(\S+)\s*$',
+            _re_dta.IGNORECASE | _re_dta.DOTALL
+        )
+        _RE_SELECT_STAR = _re_dta.compile(r'\bSELECT\s+\*', _re_dta.IGNORECASE)
+        _RE_JOIN_KW     = _re_dta.compile(r'\b(JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|FULL)\b', _re_dta.IGNORECASE)
+        _RE_UNION       = _re_dta.compile(r'\bUNION\s+(ALL)?\b', _re_dta.IGNORECASE)
+        _RE_SUBQUERY    = _re_dta.compile(r'\(\s*SELECT\b', _re_dta.IGNORECASE)
+        _RE_WHERE       = _re_dta.compile(r'\bWHERE\b', _re_dta.IGNORECASE)
+        _RE_GROUP_BY    = _re_dta.compile(r'\bGROUP\s+BY\b', _re_dta.IGNORECASE)
+        _RE_AGG_FUNCS   = _re_dta.compile(r'\b(SUM|COUNT|AVG|MIN|MAX|ARRAY_AGG|STRING_AGG)\s*\(', _re_dta.IGNORECASE)
+        _RE_ALIAS       = _re_dta.compile(r'\bAS\s+\w+', _re_dta.IGNORECASE)
+        _RE_WINDOW      = _re_dta.compile(r'\b(OVER|PARTITION\s+BY|ROW_NUMBER|RANK|DENSE_RANK|LAG|LEAD)\b', _re_dta.IGNORECASE)
+        _RE_CASE        = _re_dta.compile(r'\bCASE\b', _re_dta.IGNORECASE)
+        _RE_FROM_TABLE  = _re_dta.compile(r'\bFROM\s+([\w.`"\[\]]+)', _re_dta.IGNORECASE)
+
+        def _analyze_dt(sql: str) -> dict:
+            """Analyze a derived table SQL and return findings."""
+            findings = []
+            can_simplify = False
+            sql_clean = sql.strip().rstrip(';').strip()
+
+            has_join   = bool(_RE_JOIN_KW.search(sql_clean))
+            has_union  = bool(_RE_UNION.search(sql_clean))
+            has_subq   = bool(_RE_SUBQUERY.search(sql_clean))
+            has_where  = bool(_RE_WHERE.search(sql_clean))
+            has_group  = bool(_RE_GROUP_BY.search(sql_clean))
+            has_agg    = bool(_RE_AGG_FUNCS.search(sql_clean))
+            has_window = bool(_RE_WINDOW.search(sql_clean))
+            has_case   = bool(_RE_CASE.search(sql_clean))
+            has_star   = bool(_RE_SELECT_STAR.search(sql_clean))
+
+            # Detect simple SELECT ... FROM single_table
+            if not has_join and not has_union and not has_subq and not has_group and not has_agg and not has_window:
+                from_match = _RE_FROM_TABLE.search(sql_clean)
+                if from_match:
+                    base_table = from_match.group(1)
+                    if not has_where and not has_case:
+                        can_simplify = True
+                        findings.append((
+                            "💡 Simplifiable",
+                            f"This derived table only selects columns from `{base_table}` "
+                            f"without transformations. Consider using `sql_table_name: {base_table}` instead."
+                        ))
+                    elif not has_case:
+                        findings.append((
+                            "ℹ️ Near-simplifiable",
+                            f"Selects from `{base_table}` with a WHERE filter. "
+                            f"Could potentially use `sql_table_name` with Explore-level `sql_always_where`."
+                        ))
+
+            # ── Bad practice detection ────────────────────────────
+            if has_star:
+                findings.append((
+                    "⚠️ SELECT *",
+                    "Using SELECT * pulls all columns, increasing query cost and breaking "
+                    "if the upstream table schema changes. List columns explicitly."
+                ))
+
+            if has_union:
+                union_all = _re_dta.search(r'UNION\s+ALL', sql_clean, _re_dta.IGNORECASE)
+                if not union_all:
+                    findings.append((
+                        "⚠️ UNION without ALL",
+                        "UNION (without ALL) deduplicates rows, which is expensive. "
+                        "Use UNION ALL if deduplication is not needed."
+                    ))
+
+            subq_count = len(_RE_SUBQUERY.findall(sql_clean))
+            if subq_count >= 3:
+                findings.append((
+                    "⚠️ Excessive subqueries",
+                    f"Found {subq_count} nested subqueries. Consider using CTEs (WITH clause) "
+                    f"for better readability and maintainability."
+                ))
+
+            # Count lines to gauge complexity
+            line_count = len(sql_clean.splitlines())
+            if line_count > 100:
+                findings.append((
+                    "⚠️ Very long SQL",
+                    f"This derived table has {line_count} lines. Consider breaking it into "
+                    f"multiple views or using Looker PDTs with incremental builds."
+                ))
+
+            if not has_where and (has_join or has_group) and line_count > 10:
+                findings.append((
+                    "ℹ️ No WHERE clause",
+                    "This query has no WHERE filter. If scanning large tables, "
+                    "consider adding filters to reduce cost."
+                ))
+
+            # Check for aliases on selected columns
+            if not has_star and not _RE_ALIAS.search(sql_clean):
+                findings.append((
+                    "ℹ️ No column aliases",
+                    "No AS aliases found. Using explicit aliases improves readability "
+                    "and makes field mapping in LookML clearer."
+                ))
+
+            return {
+                "can_simplify": can_simplify,
+                "findings": findings,
+            }
+
+        # ── Run analysis on all derived tables ────────────────────
+        dta_views = [v for v in filtered_views if v.is_derived_table and v.derived_table_sql]
+        if not dta_views:
+            st.info("No derived tables with SQL in current filter.")
+        else:
+            simplifiable = []
+            flagged = []
+            for v in dta_views:
+                result_dta = _analyze_dt(v.derived_table_sql)
+                if result_dta["findings"]:
+                    entry = {
+                        "view": v,
+                        "can_simplify": result_dta["can_simplify"],
+                        "findings": result_dta["findings"],
+                    }
+                    if result_dta["can_simplify"]:
+                        simplifiable.append(entry)
+                    else:
+                        flagged.append(entry)
+
+            total_flagged = len(simplifiable) + len(flagged)
+            st.markdown(
+                f"<div style='font-family:JetBrains Mono,monospace;font-size:12px;"
+                f"color:#7B8FAE;margin-bottom:12px;'>"
+                f"Analyzed {len(dta_views)} derived table(s) · "
+                f"<b style='color:#4ade80;'>{len(simplifiable)} simplifiable</b> · "
+                f"<b style='color:#fbbf24;'>{len(flagged)} with suggestions</b></div>",
+                unsafe_allow_html=True)
+
+            if simplifiable:
+                st.markdown('<div class="section-header">💡 Can Be Simplified</div>',
+                            unsafe_allow_html=True)
+                st.caption(
+                    "These derived tables select directly from a single table without "
+                    "joins, aggregations, or transformations. Consider using sql_table_name instead."
+                )
+                for entry in simplifiable:
+                    v = entry["view"]
+                    with st.expander(f"💡  {v.name}   ({Path(v.source_file).name if v.source_file else '?'})"):
+                        for tag, msg in entry["findings"]:
+                            st.markdown(f"**{tag}** — {msg}")
+                        st.code(v.derived_table_sql, language="sql")
+
+            if flagged:
+                st.markdown('<div class="section-header">⚠️ Best Practice Suggestions</div>',
+                            unsafe_allow_html=True)
+                st.caption(
+                    "These derived tables have patterns that could be improved for "
+                    "performance, readability, or maintainability."
+                )
+                for entry in flagged:
+                    v = entry["view"]
+                    with st.expander(f"⚠️  {v.name}   ({Path(v.source_file).name if v.source_file else '?'})"):
+                        for tag, msg in entry["findings"]:
+                            st.markdown(f"**{tag}** — {msg}")
+                        st.code(v.derived_table_sql, language="sql")
+
+            if not simplifiable and not flagged:
+                st.success("✓ All derived tables look well-structured. No suggestions.")
+
 
 
 # ═══════════════════════════════════════════════════════════════
