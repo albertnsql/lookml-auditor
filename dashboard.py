@@ -260,6 +260,126 @@ def _run_audit(path: str, tmp_dir: str | None = None):
 
 
 # ─────────────────────────────────────────────────────────────
+# Cached SQL analysis for Derived Tables
+# ─────────────────────────────────────────────────────────────
+import re as _re_dta
+_RE_SIMPLE_SELECT = _re_dta.compile(r'^\s*SELECT\s+[\w\s,.*`"\[\]]+\s+FROM\s+(\S+)\s*$', _re_dta.IGNORECASE | _re_dta.DOTALL)
+_RE_SELECT_STAR = _re_dta.compile(r'\bSELECT\s+\*', _re_dta.IGNORECASE)
+_RE_JOIN_KW     = _re_dta.compile(r'\b(JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|FULL)\b', _re_dta.IGNORECASE)
+_RE_UNION       = _re_dta.compile(r'\bUNION\s+(ALL)?\b', _re_dta.IGNORECASE)
+_RE_SUBQUERY    = _re_dta.compile(r'\(\s*SELECT\b', _re_dta.IGNORECASE)
+_RE_WHERE       = _re_dta.compile(r'\bWHERE\b', _re_dta.IGNORECASE)
+_RE_GROUP_BY    = _re_dta.compile(r'\bGROUP\s+BY\b', _re_dta.IGNORECASE)
+_RE_AGG_FUNCS   = _re_dta.compile(r'\b(SUM|COUNT|AVG|MIN|MAX|ARRAY_AGG|STRING_AGG)\s*\(', _re_dta.IGNORECASE)
+_RE_ALIAS       = _re_dta.compile(r'\bAS\s+\w+', _re_dta.IGNORECASE)
+_RE_WINDOW      = _re_dta.compile(r'\b(OVER|PARTITION\s+BY|ROW_NUMBER|RANK|DENSE_RANK|LAG|LEAD)\b', _re_dta.IGNORECASE)
+_RE_CASE        = _re_dta.compile(r'\bCASE\b', _re_dta.IGNORECASE)
+_RE_FROM_TABLE  = _re_dta.compile(r'\bFROM\s+([\w.`"\[\]]+)', _re_dta.IGNORECASE)
+
+@st.cache_data(show_spinner=False)
+def _analyze_dt_cached(sql: str) -> dict:
+    findings = []
+    can_simplify = False
+    sql_clean = sql.strip().rstrip(';').strip()
+
+    has_join   = bool(_RE_JOIN_KW.search(sql_clean))
+    has_union  = bool(_RE_UNION.search(sql_clean))
+    has_subq   = bool(_RE_SUBQUERY.search(sql_clean))
+    has_where  = bool(_RE_WHERE.search(sql_clean))
+    has_group  = bool(_RE_GROUP_BY.search(sql_clean))
+    has_agg    = bool(_RE_AGG_FUNCS.search(sql_clean))
+    has_window = bool(_RE_WINDOW.search(sql_clean))
+    has_case   = bool(_RE_CASE.search(sql_clean))
+    has_star   = bool(_RE_SELECT_STAR.search(sql_clean))
+
+    if not has_join and not has_union and not has_subq and not has_group and not has_agg and not has_window:
+        from_match = _RE_FROM_TABLE.search(sql_clean)
+        if from_match:
+            base_table = from_match.group(1)
+            if not has_where and not has_case:
+                can_simplify = True
+                findings.append(("💡 Simplifiable", f"This derived table only selects columns from `{base_table}` without transformations. Consider using `sql_table_name: {base_table}` instead."))
+            elif not has_case:
+                findings.append(("ℹ️ Near-simplifiable", f"Selects from `{base_table}` with a WHERE filter. Could potentially use `sql_table_name` with Explore-level `sql_always_where`."))
+
+    if has_star:
+        findings.append(("⚠️ SELECT *", "Using SELECT * pulls all columns, increasing query cost and breaking if the upstream table schema changes. List columns explicitly."))
+    if has_union:
+        if not _re_dta.search(r'UNION\s+ALL', sql_clean, _re_dta.IGNORECASE):
+            findings.append(("⚠️ UNION without ALL", "UNION (without ALL) deduplicates rows, which is expensive. Use UNION ALL if deduplication is not needed."))
+    if len(_RE_SUBQUERY.findall(sql_clean)) >= 3:
+        findings.append(("⚠️ Excessive subqueries", f"Found {len(_RE_SUBQUERY.findall(sql_clean))} nested subqueries. Consider using CTEs (WITH clause) for better readability and maintainability."))
+    if len(sql_clean.splitlines()) > 100:
+        findings.append(("⚠️ Very long SQL", f"This derived table has {len(sql_clean.splitlines())} lines. Consider breaking it into multiple views or using Looker PDTs with incremental builds."))
+    if not has_where and (has_join or has_group) and len(sql_clean.splitlines()) > 10:
+        findings.append(("ℹ️ No WHERE clause", "This query has no WHERE filter. If scanning large tables, consider adding filters to reduce cost."))
+    if not has_star and not _RE_ALIAS.search(sql_clean):
+        findings.append(("ℹ️ No column aliases", "No AS aliases found. Using explicit aliases improves readability and makes field mapping in LookML clearer."))
+
+    return {"can_simplify": can_simplify, "findings": findings}
+
+# ─────────────────────────────────────────────────────────────
+# Cached Dependency Graph Builder
+# ─────────────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False)
+def _build_explore_graph_cached(explore_name: str, base_view: str, joins_data: list, views_meta: dict):
+    import plotly.graph_objects as go
+
+    _nodes = []
+    _edges_x, _edges_y = [], []
+    n_joins = len(joins_data)
+    root_x = 0.0
+    root_y = max(0.0, (n_joins - 1) / 2.0)
+
+    b_meta = views_meta.get(base_view, {"dims": 0, "meas": 0})
+    _nodes.append({
+        "name": f"<b>{base_view}</b><br>{b_meta['dims']}D / {b_meta['meas']}M",
+        "x": root_x, "y": root_y, "type": "base_view", "color": "#4A9EFF", "size": 36,
+        "hover": f"<b>{base_view}</b><br>Type: Base View<br>Explore: {explore_name}<br>Dimensions: {b_meta['dims']}<br>Measures: {b_meta['meas']}",
+    })
+
+    for idx, j in enumerate(joins_data):
+        jx = 1.0
+        jy = float(n_joins - 1 - idx)
+        rel = (j["relationship"] or "undefined").replace("_", " ").title()
+        jtype = (j["type"] or "left_outer").replace("_", " ").title()
+        view_name = j["resolved_view"]
+        has_condition = "✓" if j["sql_on"] else ("⚠ sql_where" if j.get("sql_where") else "❌ Missing")
+        j_meta = views_meta.get(view_name, {"dims": 0, "meas": 0})
+        rel_color = {"Many To One": "#10B981", "One To Many": "#F472B6", "One To One": "#818CF8", "Many To Many": "#F59E0B"}.get(rel, "#7B8FAE")
+
+        _nodes.append({
+            "name": f"<b>{j['name']}</b><br>{j_meta['dims']}D / {j_meta['meas']}M",
+            "x": jx, "y": jy, "type": "join", "color": rel_color, "size": 28,
+            "hover": (f"<b>{view_name}</b> (Join: {j['name']})<br>Type: {jtype}<br>Relationship: {rel}<br>Condition: {has_condition}<br>Dimensions: {j_meta['dims']}<br>Measures: {j_meta['meas']}"),
+        })
+        _edges_x.extend([root_x, jx, None])
+        _edges_y.extend([root_y, jy, None])
+
+    _fig_dep = go.Figure()
+    _fig_dep.add_trace(go.Scatter(x=_edges_x, y=_edges_y, mode="lines", line=dict(color="#2E4063", width=2), hoverinfo="skip"))
+    _fig_dep.add_trace(go.Scatter(
+        x=[n["x"] for n in _nodes], y=[n["y"] for n in _nodes], mode="markers+text",
+        marker=dict(size=[n["size"] for n in _nodes], color=[n["color"] for n in _nodes], line=dict(width=2, color="#141B2D"),
+                    symbol=["diamond" if n["type"] == "base_view" else "circle" for n in _nodes]),
+        text=[n["name"] for n in _nodes],
+        textposition="middle right" if n_joins == 0 else ["middle left" if n["type"] == "base_view" else "middle right" for n in _nodes],
+        textfont=dict(family="JetBrains Mono", size=11, color="#E2E8F0"),
+        hovertext=[n["hover"] for n in _nodes], hoverinfo="text",
+        hoverlabel=dict(bgcolor="#1A2438", bordercolor="#4A9EFF", font=dict(family="Inter", size=12, color="#E2E8F0")),
+    ))
+    _graph_h = max(300, 150 + n_joins * 60)
+    _x_range = [-0.5, 1.5] if n_joins > 0 else [-0.5, 0.5]
+    _y_range = [-0.5, max(1.0, float(n_joins))]
+    _fig_dep.update_layout(
+        height=_graph_h, margin=dict(l=40, r=100, t=30, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=_x_range),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=_y_range),
+        showlegend=False, dragmode="pan",
+    )
+    return _fig_dep
+
+# ─────────────────────────────────────────────────────────────
 # Sidebar
 # ─────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -563,22 +683,27 @@ issues     = result["issues"]
 suppressed = result.get("suppressed", 0)
 manifest   = result.get("manifest", {})
 
-# Case 4 — CSV only (no JSON export button)
-import io as _io, csv as _csv
-_csv_rows = [{"Severity": i.severity.upper(), "Category": i.category.value,
-              "Object": i.object_name, "Type": i.object_type,
-              "Message": i.message, "Suggestion": i.suggestion,
-              "File": Path(i.source_file).name if i.source_file else "",
-              "Line": i.line_number or ""}
-             for i in sorted(issues, key=lambda x: (x.severity, x.category.value))]
-_buf = _io.StringIO()
-if _csv_rows:
-    _w = _csv.DictWriter(_buf, fieldnames=list(_csv_rows[0].keys()))
-    _w.writeheader(); _w.writerows(_csv_rows)
+@st.cache_data(show_spinner=False, hash_funcs={list: id})
+def _build_csv_payload(issues_list) -> bytes:
+    import io as _io, csv as _csv
+    _csv_rows = [{"Severity": getattr(i, 'severity', '').upper(),
+                  "Category": getattr(i.category, 'value', str(i.category)) if hasattr(i, 'category') else '',
+                  "Object": getattr(i, 'object_name', ''), 
+                  "Type": getattr(i, 'object_type', ''),
+                  "Message": getattr(i, 'message', ''), 
+                  "Suggestion": getattr(i, 'suggestion', ''),
+                  "File": Path(i.source_file).name if getattr(i, 'source_file', None) else "",
+                  "Line": str(i.line_number) if getattr(i, 'line_number', None) else ""}
+                 for i in sorted(issues_list, key=lambda x: (x.severity, getattr(x.category, 'value', str(x.category)) if hasattr(x, 'category') else ''))]
+    _buf = _io.StringIO()
+    if _csv_rows:
+        _w = _csv.DictWriter(_buf, fieldnames=list(_csv_rows[0].keys()))
+        _w.writeheader(); _w.writerows(_csv_rows)
+    return _buf.getvalue().encode('utf-8')
 
 st.sidebar.download_button(
     "⬇  Download CSV",
-    data=_buf.getvalue(),
+    data=_build_csv_payload(issues),
     file_name=f"lookml_audit_{project.name}.csv",
     mime="text/csv",
     use_container_width=True,
@@ -1023,7 +1148,7 @@ with tab_iss:
         rows = [{"Severity": i.severity.upper(), "Category": i.category.value,
                  "Object": i.object_name, "Type": i.object_type, "Message": i.message,
                  "File": Path(i.source_file).name if i.source_file else "",
-                 "Line": i.line_number or ""} for i in display_issues]
+                 "Line": str(i.line_number) if getattr(i, 'line_number', None) else ""} for i in display_issues]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=440)
 
         st.markdown('<div class="section-header">Details & Suggestions (first 50)</div>',
@@ -1768,7 +1893,7 @@ with tab_fv:
             if file_issues:
                 st.markdown('<div class="section-header">Issues in this file</div>',
                             unsafe_allow_html=True)
-                irows = [{"Line": i.line_number or "—", "Severity": i.severity.upper(),
+                irows = [{"Line": str(i.line_number) if getattr(i, 'line_number', None) else "—", "Severity": i.severity.upper(),
                           "Category": i.category.value, "Object": i.object_name,
                           "Message": i.message}
                          for i in sorted(file_issues, key=lambda x: x.line_number or 0)]
