@@ -240,6 +240,18 @@ def _parse_file(
     return views, explores
 
 
+def _parse_chunk(args: tuple[list[Path], dict]) -> tuple[list[LookMLView], list[LookMLExplore]]:
+    """Worker function for concurrent chunk processing."""
+    paths, constants = args
+    res_views = []
+    res_explores = []
+    for p in paths:
+        v, e = _parse_file(p, constants)
+        res_views.extend(v)
+        res_explores.extend(e)
+    return res_views, res_explores
+
+
 # ---------------------------------------------------------------------------
 # Project parser (public API)
 # ---------------------------------------------------------------------------
@@ -247,20 +259,26 @@ def parse_project(root_path: str) -> LookMLProject:
     """
     Walk a LookML project directory, parse all .lkml files,
     and return a LookMLProject with all views and explores.
+    Runs concurrently using a ThreadPoolExecutor to reduce wait times on large repos.
     """
+    import concurrent.futures
+
     root = Path(root_path)
     constants = parse_manifest(root_path)
 
     all_views: list[LookMLView]   = []
     all_explores: list[LookMLExplore] = []
 
-    for lkml_file in sorted(root.rglob("*.lkml")):
-        # Skip manifest
-        if lkml_file.name.lower() == "manifest.lkml":
-            continue
-        views, explores = _parse_file(lkml_file, constants)
-        all_views.extend(views)
-        all_explores.extend(explores)
+    lkml_files = [f for f in sorted(root.rglob("*.lkml")) if f.name.lower() != "manifest.lkml"]
+    
+    chunk_size = 50
+    chunks = [(lkml_files[i:i + chunk_size], constants) for i in range(0, len(lkml_files), chunk_size)]
+
+    if chunks:
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for views, explores in executor.map(_parse_chunk, chunks):
+                all_views.extend(views)
+                all_explores.extend(explores)
 
     return LookMLProject(
         name=root.name,
