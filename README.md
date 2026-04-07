@@ -1,31 +1,23 @@
 # 🔍 LookML Auditor
 
-**LookML Auditor** is a static analysis tool built to catch LookML issues that are easy to miss in code review — missing descriptions, orphaned views, joins without a relationship defined, explores with broken references, and more. 
-
-Originally built out of frustration with how much bad LookML slips through to production. Parses `.lkml` files using the `lkml` library (`proper AST, not regex`), so it handles `;;`-terminated SQL, `dimension_group` timeframes, `extends`, manifest constants, and nested derived tables correctly.
-
----
-
-## 🛠 What's Included (Current State)
-
-We recently overhauled the auditor for extreme performance and accuracy. Here is what is actively operating in the application today:
-
-* **🌳 Interactive Dependency Trees**: Automatically visualizes `Explore → View` joins in a comprehensive top-to-bottom layout mapping Many-to-One and One-to-Many nodes.
-* **🧠 SQL Derived Table Analysis**: Employs cached AST-like heuristics to read raw `derived_table_sql`, catching `SELECT *`, missing `WHERE` clauses, and alerting developers when they can simplify native tables.
-* **📊 Dashboard & Metrics**: Runs locally on a dynamic **Streamlit** dashboard. Includes a 0–100 Health Score calculation and breakdown of errors by Category and Severity.
-* **📥 CSV Export**: Clean, one-click export of data issues to pipe into sprint planning.
-* **🛡️ Robust Stability**: Fixed parsing crashes by heavily coercing mixed dataframe types, meaning large complex repos load flawlessly.
+**LookML Auditor** is a powerful, privacy-first static analysis tool for Looker projects. It helps developers maintain high-quality code by detecting broken references, duplicate definitions, and join integrity issues—all in one beautiful dashboard.
 
 ---
 
 ## 🚀 How to Use
 
-### Local Setup (Developer Mode)
-Run the auditor locally on your machine for the best performance.
+### 1. Cloud-Hosted (Streamlit Community Cloud)
+The easiest way to use the auditor without any installation.
+*   **Access**: [lookml-auditor.streamlit.app](https://lookml-auditor.streamlit.app)
+*   **GitHub URL**: Paste any public LookML repository URL to audit it instantly.
+*   **ZIP Upload**: Upload a folder of your LookML project in `.zip` format. Perfect for private repos.
+
+### 2. Local Setup (Developer Mode)
+Run the auditor locally on your machine for the best performance and "Local Folder" access.
 
 **Prerequisites**:
-* Python 3.8+
-* Streamlit, Plotly, Rich, Pydantic
+*   Python 3.8+
+*   Git (optional, for GitHub source)
 
 **Installation**:
 ```bash
@@ -42,6 +34,18 @@ streamlit run dashboard.py
 
 ---
 
+## 🛠 Features & Capabilities
+
+*   **⚡ Instant Health Score**: A proprietary 0–100 score based on repo size and issue density.
+*   **🐙 GitHub Integration**: Audit any public repository by simply pasting its URL.
+*   **🤐 ZIP Upload Support**: Securely audit local projects in the cloud via ZIP extraction.
+*   **📂 Local Folder Audit**: Points directly to your local development directory (Desktop only).
+*   **📊 Dynamic Visualizations**: Interactive graphs and charts powered by Plotly.
+*   **📥 CSV Export**: Download a full list of issues and suggestions for easy tracking.
+*   **🔒 Privacy-First**: 100% in-memory analysis. Your code never leaves the session.
+
+---
+
 ## 🏗 Understanding the Audit
 
 The Auditor categorizes findings into four key pillars:
@@ -54,9 +58,9 @@ The Auditor categorizes findings into four key pillars:
 | **Field Quality** | Missing primary keys, orphaned views, and unlabeled fields. |
 
 ### Health Score Status
-* ⭐ **85–100**: Healthy
-* ⚠️ **60–84**: Needs Attention
-* 🔴 **0–59**: Critical Integrity Issues
+*   ⭐ **85–100**: Healthy
+*   ⚠️ **60–84**: Needs Attention
+*   🔴 **0–59**: Critical Integrity Issues
 
 ---
 
@@ -64,12 +68,12 @@ The Auditor categorizes findings into four key pillars:
 
 ```bash
 lookml-auditor/
-├── dashboard.py         # Main Streamlit UI & logic (Cached and Optimized)
-├── lookml_parser/       # Hyper-optimized LookML engine
-├── validators/          # The audit rules & scoring validations
-├── reporting/           # Export engines and formatting
-├── tests/               # 20/20 Passing Automated test suite
-└── mock_project/        # Sample LookML with seeded errors for testing
+├── dashboard.py         # Main Streamlit UI & logic
+├── lookml_parser/       # Regex-based LookML engine
+├── validators/          # The audit rules & scoring engine
+├── reporting/           # CSV and JSON report generators
+├── tests/               # Automated test suite
+└── mock_project/        # Sample LookML for demo purposes
 ```
 
 ---
