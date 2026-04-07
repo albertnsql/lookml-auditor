@@ -2,7 +2,7 @@
 
 **LookML Auditor** is a static analysis tool built to catch LookML issues that are easy to miss in code review — missing descriptions, orphaned views, joins without a relationship defined, explores with broken references, and more. 
 
-Originally built out of frustration with how much bad LookML slips through to production, this tool parses `.lkml` files using a **hyper-optimized custom parser** (C-level string operations). Because it's aware of LookML block scope and syntax, it correctly handles `;;`-terminated SQL, extends, nested derived tables, and dimension groups.
+Originally built out of frustration with how much bad LookML slips through to production. Parses `.lkml` files using the `lkml` library (`proper AST, not regex`), so it handles `;;`-terminated SQL, `dimension_group` timeframes, `extends`, manifest constants, and nested derived tables correctly.
 
 ---
 
@@ -10,7 +10,6 @@ Originally built out of frustration with how much bad LookML slips through to pr
 
 We recently overhauled the auditor for extreme performance and accuracy. Here is what is actively operating in the application today:
 
-* **⚡ Ultra-Fast Custom Parsing Engine**: Migrated away from recursive Python loops in favor of native C-speed block evaluations (`str.find()`) to parse massive `*.view.lkml` files instantly.
 * **🌳 Interactive Dependency Trees**: Automatically visualizes `Explore → View` joins in a comprehensive top-to-bottom layout mapping Many-to-One and One-to-Many nodes.
 * **🧠 SQL Derived Table Analysis**: Employs cached AST-like heuristics to read raw `derived_table_sql`, catching `SELECT *`, missing `WHERE` clauses, and alerting developers when they can simplify native tables.
 * **📊 Dashboard & Metrics**: Runs locally on a dynamic **Streamlit** dashboard. Includes a 0–100 Health Score calculation and breakdown of errors by Category and Severity.
