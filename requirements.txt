@@ -3,3 +3,5 @@ plotly>=5.19
 click>=8.1
 rich>=13.7
 pydantic>=2.6
+lkml>=1.3
+

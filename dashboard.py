@@ -12,7 +12,7 @@ Case 8 : Folder picker — tkinter (Windows/Linux) / osascript (Mac),
          banner + fallback to text input if unavailable
 """
 from __future__ import annotations
-import sys, os, json, shutil, subprocess, tempfile, platform, zipfile
+import sys, os, json, shutil, subprocess, tempfile, platform, zipfile, math, re
 from collections import Counter
 from pathlib import Path
 
@@ -25,6 +25,20 @@ import pandas as pd
 from lookml_parser import parse_project
 from validators import run_all_checks, compute_health_score, compute_category_scores, Severity, IssueCategory
 from validators.suppression import load_suppression_rules, apply_suppressions, EXAMPLE_CONFIG
+
+# ── Module-level compiled patterns for DT analysis (compiled once) ────
+_DTA_RE_SELECT_STAR = re.compile(r'\bSELECT\s+\*', re.IGNORECASE)
+_DTA_RE_JOIN_KW     = re.compile(r'\b(JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|FULL)\b', re.IGNORECASE)
+_DTA_RE_UNION       = re.compile(r'\bUNION\s+(ALL)?\b', re.IGNORECASE)
+_DTA_RE_SUBQUERY    = re.compile(r'\(\s*SELECT\b', re.IGNORECASE)
+_DTA_RE_WHERE       = re.compile(r'\bWHERE\b', re.IGNORECASE)
+_DTA_RE_GROUP_BY    = re.compile(r'\bGROUP\s+BY\b', re.IGNORECASE)
+_DTA_RE_AGG_FUNCS   = re.compile(r'\b(SUM|COUNT|AVG|MIN|MAX|ARRAY_AGG|STRING_AGG)\s*\(', re.IGNORECASE)
+_DTA_RE_ALIAS       = re.compile(r'\bAS\s+\w+', re.IGNORECASE)
+_DTA_RE_WINDOW      = re.compile(r'\b(OVER|PARTITION\s+BY|ROW_NUMBER|RANK|DENSE_RANK|LAG|LEAD)\b', re.IGNORECASE)
+_DTA_RE_CASE        = re.compile(r'\bCASE\b', re.IGNORECASE)
+_DTA_RE_FROM_TABLE  = re.compile(r'\bFROM\s+([\w.`"\[\]]+)', re.IGNORECASE)
+_DTA_RE_UNION_ALL   = re.compile(r'UNION\s+ALL', re.IGNORECASE)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1267,8 +1281,8 @@ with tab_inv:
             })
         st.dataframe(pd.DataFrame(exp_rows), use_container_width=True, hide_index=True)
 
-        # ── Interactive Dependency Graph ───────────────────────────
-        st.markdown('<div class="section-header">Explore → View Dependency Graph</div>',
+        # ── Interactive Tree Dependency Graph ──────────────────────
+        st.markdown('<div class="section-header">Explore → View Dependency Tree</div>',
                     unsafe_allow_html=True)
         if filtered_explores:
             _graph_explore = st.selectbox(
@@ -1276,124 +1290,203 @@ with tab_inv:
                 options=[e.name for e in filtered_explores],
                 label_visibility="collapsed",
                 key="dep_graph_explore",
+                help="Select an explore to visualise its view dependency tree",
             )
             _sel_exp = next((e for e in filtered_explores if e.name == _graph_explore), None)
             if _sel_exp:
-                import math
+                # Build view metadata map from project for O(1) lookup
+                _vm: dict[str, dict] = {}
+                for _pv in project.views:
+                    _vm[_pv.name] = {
+                        "dims":   len(_pv.dimensions),
+                        "meas":   len(_pv.measures),
+                        "is_dt":  _pv.is_derived_table,
+                        "table":  (_pv.sql_table_name or "").split(".")[-1].strip("`\"'") or None,
+                    }
 
-                # Build nodes and edges
-                _nodes = []
-                _edges_x, _edges_y = [], []
-                _center_x, _center_y = 0.5, 0.5
+                # ── Build tree coordinates ───────────────────────────
+                # Layout: Explore root (col 0) → Base View (col 1) → Joined views (col 2)
+                _nodes: list[dict] = []
+                _edge_traces: list[go.Scatter] = []
+                _annots: list[dict] = []
 
-                # Base view at center
+                _col_x = [0.05, 0.35, 0.75]   # x positions for each column
+                _n_joins = len(_sel_exp.joins)
+
+                # --- Explore root node ---
+                _ex_y = 0.5
+                _ex_meta = _vm.get(_sel_exp.name, {})
                 _nodes.append({
-                    "name": _sel_exp.base_view,
-                    "x": _center_x, "y": _center_y,
-                    "type": "base_view",
-                    "color": "#4A9EFF",
-                    "size": 32,
-                    "hover": f"<b>{_sel_exp.base_view}</b><br>Type: Base View<br>Explore: {_sel_exp.name}",
+                    "x": _col_x[0], "y": _ex_y,
+                    "label": f"🔍 {_sel_exp.name}",
+                    "color": "#4A9EFF", "size": 26, "symbol": "diamond",
+                    "hover": (
+                        f"<b>Explore: {_sel_exp.name}</b><br>"
+                        f"Label: {_sel_exp.label or '—'}<br>"
+                        f"Base View: {_sel_exp.base_view}"
+                    ),
                 })
 
-                # Joined views arranged in a circle
-                n_joins = len(_sel_exp.joins)
-                for idx, j in enumerate(_sel_exp.joins):
-                    angle = (2 * math.pi * idx / max(n_joins, 1)) - math.pi / 2
-                    radius = 0.35
-                    jx = _center_x + radius * math.cos(angle)
-                    jy = _center_y + radius * math.sin(angle)
+                # --- Base view node ---
+                _bv = _sel_exp.base_view
+                _bv_meta = _vm.get(_bv, {})
+                _bv_dt   = _bv_meta.get("is_dt", False)
+                _bv_tbl  = _bv_meta.get("table")
+                _bv_badge = "🔧 DT" if _bv_dt else (f"🗄 {_bv_tbl}" if _bv_tbl else "🗄 View")
+                _bv_y = 0.5
+                _nodes.append({
+                    "x": _col_x[1], "y": _bv_y,
+                    "label": _bv,
+                    "color": "#4A9EFF", "size": 22, "symbol": "square",
+                    "hover": (
+                        f"<b>{_bv}</b><br>"
+                        f"Role: Base View<br>"
+                        f"{_bv_badge}<br>"
+                        f"📐 {_bv_meta.get('dims', '?')} dims · "
+                        f"📊 {_bv_meta.get('meas', '?')} measures"
+                    ),
+                })
+                # Edge: Explore → Base view
+                _edge_traces.append(go.Scatter(
+                    x=[_col_x[0], _col_x[1]], y=[_ex_y, _bv_y],
+                    mode="lines", hoverinfo="skip",
+                    line=dict(color="#2E4063", width=2, dash="dot"),
+                ))
 
-                    rel = (j.relationship or "undefined").replace("_", " ").title()
-                    jtype = (j.type or "left_outer").replace("_", " ").title()
-                    view_name = j.resolved_view
-                    has_condition = "✓" if j.sql_on else ("⚠ sql_where" if getattr(j, 'sql_where', None) else "❌ Missing")
+                # --- Joined view nodes ---
+                _rel_color_map = {
+                    "many_to_one": "#10B981", "one_to_many": "#F472B6",
+                    "one_to_one":  "#818CF8", "many_to_many": "#F59E0B",
+                }
+                _join_y_spacing = 1.0 / max(_n_joins, 1)
+                for _idx, _j in enumerate(_sel_exp.joins):
+                    _jv = _j.resolved_view
+                    _jv_meta = _vm.get(_jv, {})
+                    _jv_dt  = _jv_meta.get("is_dt", False)
+                    _jv_tbl = _jv_meta.get("table")
+                    _jv_badge = "🔧 DT" if _jv_dt else (f"🗄 {_jv_tbl}" if _jv_tbl else "🗄 View")
 
-                    # Color by relationship type
-                    rel_color = {
-                        "Many To One": "#10B981", "One To Many": "#F472B6",
-                        "One To One": "#818CF8", "Many To Many": "#F59E0B",
-                    }.get(rel, "#7B8FAE")
+                    _jrel   = (_j.relationship or "undefined")
+                    _jtype  = (_j.type or "left_outer").replace("_", " ").title()
+                    _jrel_d = _jrel.replace("_", " ").title()
+                    _jcolor = _rel_color_map.get(_jrel, "#7B8FAE")
+                    _has_on = "✓" if _j.sql_on else ("⚠ sql_where" if getattr(_j, "sql_where", None) else "❌ Missing")
+
+                    # Spread vertically: centre at 0.5, spread upward/downward
+                    _jy = 0.5 + (_idx - (_n_joins - 1) / 2) * _join_y_spacing * 0.85
 
                     _nodes.append({
-                        "name": view_name,
-                        "x": jx, "y": jy,
-                        "type": "join",
-                        "color": rel_color,
-                        "size": 22,
+                        "x": _col_x[2], "y": _jy,
+                        "label": _jv,
+                        "color": _jcolor, "size": 18, "symbol": "circle",
                         "hover": (
-                            f"<b>{view_name}</b><br>"
-                            f"Join: {j.name}<br>"
-                            f"Type: {jtype}<br>"
-                            f"Relationship: {rel}<br>"
-                            f"Condition: {has_condition}"
+                            f"<b>{_jv}</b><br>"
+                            f"Join alias: {_j.name}<br>"
+                            f"Type: {_jtype}<br>"
+                            f"Relationship: {_jrel_d}<br>"
+                            f"Condition: {_has_on}<br>"
+                            f"{_jv_badge}<br>"
+                            f"📐 {_jv_meta.get('dims', '?')} dims · "
+                            f"📊 {_jv_meta.get('meas', '?')} measures"
                         ),
                     })
 
-                    # Edge from center to this node
-                    _edges_x.extend([_center_x, jx, None])
-                    _edges_y.extend([_center_y, jy, None])
+                    # Edge: Base view → Joined view (with label)
+                    _mid_x = (_col_x[1] + _col_x[2]) / 2
+                    _mid_y = (_bv_y + _jy) / 2
+                    _edge_traces.append(go.Scatter(
+                        x=[_col_x[1], _col_x[2]], y=[_bv_y, _jy],
+                        mode="lines", hoverinfo="skip",
+                        line=dict(color=_jcolor + "88", width=2),
+                    ))
+                    # Edge label annotation
+                    _annots.append(dict(
+                        x=_mid_x, y=_mid_y,
+                        text=f"<span style='font-size:9px;color:{_jcolor};'>{_jtype}<br>{_jrel_d}</span>",
+                        showarrow=False,
+                        font=dict(family="JetBrains Mono", size=9, color=_jcolor),
+                        bgcolor="rgba(15,22,40,0.82)",
+                        bordercolor=_jcolor + "55",
+                        borderwidth=1,
+                        borderpad=3,
+                    ))
 
-                # Build Plotly figure
+                # ── Build figure ─────────────────────────────────────
                 _fig_dep = go.Figure()
+                for _et in _edge_traces:
+                    _fig_dep.add_trace(_et)
 
-                # Edges
-                _fig_dep.add_trace(go.Scatter(
-                    x=_edges_x, y=_edges_y, mode="lines",
-                    line=dict(color="#2E4063", width=2),
-                    hoverinfo="skip",
-                ))
+                # Node sublabels (badges below node name)
+                _node_texts = []
+                for _nd in _nodes:
+                    _fig_dep.add_trace(go.Scatter(
+                        x=[_nd["x"]], y=[_nd["y"]],
+                        mode="markers+text",
+                        marker=dict(
+                            size=_nd["size"], color=_nd["color"],
+                            symbol=_nd["symbol"],
+                            line=dict(width=2, color="#0F1628"),
+                        ),
+                        text=[_nd["label"]],
+                        textposition="top center",
+                        textfont=dict(family="JetBrains Mono", size=10, color="#E2E8F0"),
+                        hovertext=[_nd["hover"]],
+                        hoverinfo="text",
+                        hoverlabel=dict(
+                            bgcolor="#1A2438", bordercolor=_nd["color"],
+                            font=dict(family="Inter", size=12, color="#E2E8F0"),
+                        ),
+                    ))
 
-                # Nodes
-                _fig_dep.add_trace(go.Scatter(
-                    x=[n["x"] for n in _nodes],
-                    y=[n["y"] for n in _nodes],
-                    mode="markers+text",
-                    marker=dict(
-                        size=[n["size"] for n in _nodes],
-                        color=[n["color"] for n in _nodes],
-                        line=dict(width=2, color="#141B2D"),
-                        symbol=["diamond" if n["type"] == "base_view" else "circle" for n in _nodes],
-                    ),
-                    text=[n["name"] for n in _nodes],
-                    textposition="top center",
-                    textfont=dict(family="JetBrains Mono", size=10, color="#E2E8F0"),
-                    hovertext=[n["hover"] for n in _nodes],
-                    hoverinfo="text",
-                    hoverlabel=dict(
-                        bgcolor="#1A2438",
-                        bordercolor="#4A9EFF",
-                        font=dict(family="Inter", size=12, color="#E2E8F0"),
-                    ),
-                ))
-
-                _graph_h = max(380, 280 + n_joins * 12)
+                _graph_h = max(420, 200 + _n_joins * 55)
+                _y_pad = 0.25 + _n_joins * 0.06
                 _fig_dep.update_layout(
                     height=_graph_h,
-                    margin=dict(l=20, r=20, t=30, b=20),
+                    margin=dict(l=10, r=10, t=30, b=20),
                     paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.05, 1.05]),
-                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.05, 1.05]),
+                    plot_bgcolor="rgba(14,20,35,0.6)",
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                               range=[-0.02, 1.02]),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                               range=[0.5 - _y_pad, 0.5 + _y_pad]),
                     showlegend=False,
                     dragmode="pan",
+                    annotations=_annots,
                 )
-                st.plotly_chart(_fig_dep, use_container_width=True, config={"displayModeBar": False})
+                # Column header annotations
+                for _cx, _lbl in zip(_col_x, ["Explore", "Base View", "Joined Views"]):
+                    _fig_dep.add_annotation(
+                        x=_cx, y=0.5 + _y_pad - 0.03,
+                        text=f"<b style='color:#7B8FAE;font-size:10px;'>{_lbl}</b>",
+                        showarrow=False, yref="y",
+                        font=dict(family="Inter", size=10, color="#7B8FAE"),
+                    )
+
+                st.plotly_chart(_fig_dep, use_container_width=True,
+                                config={"displayModeBar": False, "scrollZoom": True})
 
                 # Legend
+                _leg_items = [
+                    ("◆", "#4A9EFF", "Explore root"),
+                    ("■", "#4A9EFF", "Base view"),
+                    ("●", "#10B981", "Many→1"),
+                    ("●", "#F472B6", "1→Many"),
+                    ("●", "#818CF8", "1→1"),
+                    ("●", "#F59E0B", "Many→Many"),
+                    ("●", "#7B8FAE", "Undefined"),
+                ]
                 st.markdown(
-                    "<div style='display:flex;gap:16px;flex-wrap:wrap;justify-content:center;"
-                    "font-family:JetBrains Mono,monospace;font-size:10px;color:#7B8FAE;'>"
-                    "<span>◆ <span style='color:#4A9EFF;'>Base View</span></span>"
-                    "<span>● <span style='color:#10B981;'>Many:1</span></span>"
-                    "<span>● <span style='color:#F472B6;'>1:Many</span></span>"
-                    "<span>● <span style='color:#818CF8;'>1:1</span></span>"
-                    "<span>● <span style='color:#F59E0B;'>Many:Many</span></span>"
-                    "<span>● <span style='color:#7B8FAE;'>Undefined</span></span>"
+                    "<div style='display:flex;gap:14px;flex-wrap:wrap;justify-content:center;"
+                    "font-family:JetBrains Mono,monospace;font-size:10px;color:#7B8FAE;"
+                    "margin-top:6px;'>" +
+                    "".join(f"<span>{sym} <span style='color:{c};'>{lbl}</span></span>"
+                            for sym, c, lbl in _leg_items) +
                     "</div>",
                     unsafe_allow_html=True)
         else:
             st.info("No explores in current filter.")
+
+
 
     with inv_subtab_joins:
         st.markdown('<div class="section-header">Join Relationship Summary</div>',
@@ -1481,184 +1574,126 @@ with tab_inv:
                                 config={"displayModeBar": False})
 
 
-    # ── Derived Table Alternatives (new sub-tab) ─────────────────────
+    # ── Derived Table Alternatives (lazy-loaded) ──────────────────────
     with inv_subtab_dta:
-        import re as _re_dta
-
         st.markdown('<div class="section-header">Derived Table Alternatives</div>',
                     unsafe_allow_html=True)
         st.caption(
             "Views using derived_table that could potentially be simplified. "
-            "These are best-practice suggestions, not errors."
+            "Analysis runs on demand — click the button below."
         )
 
-        # ── Analysis helpers ──────────────────────────────────────
-        _RE_SIMPLE_SELECT = _re_dta.compile(
-            r'^\s*SELECT\s+[\w\s,.*`"\[\]]+\s+FROM\s+(\S+)\s*$',
-            _re_dta.IGNORECASE | _re_dta.DOTALL
-        )
-        _RE_SELECT_STAR = _re_dta.compile(r'\bSELECT\s+\*', _re_dta.IGNORECASE)
-        _RE_JOIN_KW     = _re_dta.compile(r'\b(JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|FULL)\b', _re_dta.IGNORECASE)
-        _RE_UNION       = _re_dta.compile(r'\bUNION\s+(ALL)?\b', _re_dta.IGNORECASE)
-        _RE_SUBQUERY    = _re_dta.compile(r'\(\s*SELECT\b', _re_dta.IGNORECASE)
-        _RE_WHERE       = _re_dta.compile(r'\bWHERE\b', _re_dta.IGNORECASE)
-        _RE_GROUP_BY    = _re_dta.compile(r'\bGROUP\s+BY\b', _re_dta.IGNORECASE)
-        _RE_AGG_FUNCS   = _re_dta.compile(r'\b(SUM|COUNT|AVG|MIN|MAX|ARRAY_AGG|STRING_AGG)\s*\(', _re_dta.IGNORECASE)
-        _RE_ALIAS       = _re_dta.compile(r'\bAS\s+\w+', _re_dta.IGNORECASE)
-        _RE_WINDOW      = _re_dta.compile(r'\b(OVER|PARTITION\s+BY|ROW_NUMBER|RANK|DENSE_RANK|LAG|LEAD)\b', _re_dta.IGNORECASE)
-        _RE_CASE        = _re_dta.compile(r'\bCASE\b', _re_dta.IGNORECASE)
-        _RE_FROM_TABLE  = _re_dta.compile(r'\bFROM\s+([\w.`"\[\]]+)', _re_dta.IGNORECASE)
-
-        def _analyze_dt(sql: str) -> dict:
-            """Analyze a derived table SQL and return findings."""
-            findings = []
-            can_simplify = False
-            sql_clean = sql.strip().rstrip(';').strip()
-
-            has_join   = bool(_RE_JOIN_KW.search(sql_clean))
-            has_union  = bool(_RE_UNION.search(sql_clean))
-            has_subq   = bool(_RE_SUBQUERY.search(sql_clean))
-            has_where  = bool(_RE_WHERE.search(sql_clean))
-            has_group  = bool(_RE_GROUP_BY.search(sql_clean))
-            has_agg    = bool(_RE_AGG_FUNCS.search(sql_clean))
-            has_window = bool(_RE_WINDOW.search(sql_clean))
-            has_case   = bool(_RE_CASE.search(sql_clean))
-            has_star   = bool(_RE_SELECT_STAR.search(sql_clean))
-
-            # Detect simple SELECT ... FROM single_table
-            if not has_join and not has_union and not has_subq and not has_group and not has_agg and not has_window:
-                from_match = _RE_FROM_TABLE.search(sql_clean)
-                if from_match:
-                    base_table = from_match.group(1)
-                    if not has_where and not has_case:
-                        can_simplify = True
-                        findings.append((
-                            "💡 Simplifiable",
-                            f"This derived table only selects columns from `{base_table}` "
-                            f"without transformations. Consider using `sql_table_name: {base_table}` instead."
-                        ))
-                    elif not has_case:
-                        findings.append((
-                            "ℹ️ Near-simplifiable",
-                            f"Selects from `{base_table}` with a WHERE filter. "
-                            f"Could potentially use `sql_table_name` with Explore-level `sql_always_where`."
-                        ))
-
-            # ── Bad practice detection ────────────────────────────
-            if has_star:
-                findings.append((
-                    "⚠️ SELECT *",
-                    "Using SELECT * pulls all columns, increasing query cost and breaking "
-                    "if the upstream table schema changes. List columns explicitly."
-                ))
-
-            if has_union:
-                union_all = _re_dta.search(r'UNION\s+ALL', sql_clean, _re_dta.IGNORECASE)
-                if not union_all:
-                    findings.append((
-                        "⚠️ UNION without ALL",
-                        "UNION (without ALL) deduplicates rows, which is expensive. "
-                        "Use UNION ALL if deduplication is not needed."
-                    ))
-
-            subq_count = len(_RE_SUBQUERY.findall(sql_clean))
-            if subq_count >= 3:
-                findings.append((
-                    "⚠️ Excessive subqueries",
-                    f"Found {subq_count} nested subqueries. Consider using CTEs (WITH clause) "
-                    f"for better readability and maintainability."
-                ))
-
-            # Count lines to gauge complexity
-            line_count = len(sql_clean.splitlines())
-            if line_count > 100:
-                findings.append((
-                    "⚠️ Very long SQL",
-                    f"This derived table has {line_count} lines. Consider breaking it into "
-                    f"multiple views or using Looker PDTs with incremental builds."
-                ))
-
-            if not has_where and (has_join or has_group) and line_count > 10:
-                findings.append((
-                    "ℹ️ No WHERE clause",
-                    "This query has no WHERE filter. If scanning large tables, "
-                    "consider adding filters to reduce cost."
-                ))
-
-            # Check for aliases on selected columns
-            if not has_star and not _RE_ALIAS.search(sql_clean):
-                findings.append((
-                    "ℹ️ No column aliases",
-                    "No AS aliases found. Using explicit aliases improves readability "
-                    "and makes field mapping in LookML clearer."
-                ))
-
-            return {
-                "can_simplify": can_simplify,
-                "findings": findings,
-            }
-
-        # ── Run analysis on all derived tables ────────────────────
         dta_views = [v for v in filtered_views if v.is_derived_table and v.derived_table_sql]
         if not dta_views:
             st.info("No derived tables with SQL in current filter.")
         else:
-            simplifiable = []
-            flagged = []
-            for v in dta_views:
-                result_dta = _analyze_dt(v.derived_table_sql)
-                if result_dta["findings"]:
-                    entry = {
-                        "view": v,
-                        "can_simplify": result_dta["can_simplify"],
-                        "findings": result_dta["findings"],
-                    }
-                    if result_dta["can_simplify"]:
-                        simplifiable.append(entry)
-                    else:
-                        flagged.append(entry)
-
-            total_flagged = len(simplifiable) + len(flagged)
             st.markdown(
                 f"<div style='font-family:JetBrains Mono,monospace;font-size:12px;"
-                f"color:#7B8FAE;margin-bottom:12px;'>"
-                f"Analyzed {len(dta_views)} derived table(s) · "
-                f"<b style='color:#4ade80;'>{len(simplifiable)} simplifiable</b> · "
-                f"<b style='color:#fbbf24;'>{len(flagged)} with suggestions</b></div>",
+                f"color:#7B8FAE;margin-bottom:10px;'>"
+                f"{len(dta_views)} derived table(s) in current filter</div>",
                 unsafe_allow_html=True)
 
-            if simplifiable:
-                st.markdown('<div class="section-header">💡 Can Be Simplified</div>',
-                            unsafe_allow_html=True)
-                st.caption(
-                    "These derived tables select directly from a single table without "
-                    "joins, aggregations, or transformations. Consider using sql_table_name instead."
-                )
-                for entry in simplifiable:
-                    v = entry["view"]
-                    with st.expander(f"💡  {v.name}   ({Path(v.source_file).name if v.source_file else '?'})"):
-                        for tag, msg in entry["findings"]:
-                            st.markdown(f"**{tag}** — {msg}")
-                        st.code(v.derived_table_sql, language="sql")
+            # ── Lazy trigger ──────────────────────────────────────────
+            _dta_key = f"dta_results_{tuple(v.name for v in dta_views)}"
+            if _dta_key not in st.session_state:
+                st.session_state[_dta_key] = None
 
-            if flagged:
-                st.markdown('<div class="section-header">⚠️ Best Practice Suggestions</div>',
-                            unsafe_allow_html=True)
-                st.caption(
-                    "These derived tables have patterns that could be improved for "
-                    "performance, readability, or maintainability."
-                )
-                for entry in flagged:
-                    v = entry["view"]
-                    with st.expander(f"⚠️  {v.name}   ({Path(v.source_file).name if v.source_file else '?'})"):
-                        for tag, msg in entry["findings"]:
-                            st.markdown(f"**{tag}** — {msg}")
-                        st.code(v.derived_table_sql, language="sql")
+            if st.button("▶  Analyze Derived Tables", key="dta_run_btn",
+                         help="Runs SQL pattern analysis on all derived tables"):
+                # ── Analysis function (uses module-level compiled patterns) ─
+                def _analyze_dt(sql: str) -> dict:
+                    findings = []
+                    can_simplify = False
+                    sql_clean = sql.strip().rstrip(';').strip()
 
-            if not simplifiable and not flagged:
-                st.success("✓ All derived tables look well-structured. No suggestions.")
+                    has_join   = bool(_DTA_RE_JOIN_KW.search(sql_clean))
+                    has_union  = bool(_DTA_RE_UNION.search(sql_clean))
+                    has_subq   = bool(_DTA_RE_SUBQUERY.search(sql_clean))
+                    has_where  = bool(_DTA_RE_WHERE.search(sql_clean))
+                    has_group  = bool(_DTA_RE_GROUP_BY.search(sql_clean))
+                    has_agg    = bool(_DTA_RE_AGG_FUNCS.search(sql_clean))
+                    has_window = bool(_DTA_RE_WINDOW.search(sql_clean))
+                    has_case   = bool(_DTA_RE_CASE.search(sql_clean))
+                    has_star   = bool(_DTA_RE_SELECT_STAR.search(sql_clean))
 
+                    if not has_join and not has_union and not has_subq and not has_group and not has_agg and not has_window:
+                        fm = _DTA_RE_FROM_TABLE.search(sql_clean)
+                        if fm:
+                            base_table = fm.group(1)
+                            if not has_where and not has_case:
+                                can_simplify = True
+                                findings.append(("💡 Simplifiable",
+                                    f"Selects only from `{base_table}` without transformations. "
+                                    f"Consider `sql_table_name: {base_table}` instead."))
+                            elif not has_case:
+                                findings.append(("ℹ️ Near-simplifiable",
+                                    f"Selects from `{base_table}` with WHERE. "
+                                    f"Consider `sql_table_name` + Explore-level `sql_always_where`."))
 
+                    if has_star:
+                        findings.append(("⚠️ SELECT *",
+                            "SELECT * is risky — pulls all columns and breaks on schema changes."))
+                    if has_union and not _DTA_RE_UNION_ALL.search(sql_clean):
+                        findings.append(("⚠️ UNION without ALL",
+                            "UNION deduplicates rows expensively. Use UNION ALL if dedup not needed."))
+                    subq_count = len(_DTA_RE_SUBQUERY.findall(sql_clean))
+                    if subq_count >= 3:
+                        findings.append(("⚠️ Excessive subqueries",
+                            f"{subq_count} nested subqueries found. Consider CTEs (WITH clause)."))
+                    line_count = len(sql_clean.splitlines())
+                    if line_count > 100:
+                        findings.append(("⚠️ Very long SQL",
+                            f"{line_count} lines. Consider splitting into multiple views or PDTs."))
+                    if not has_where and (has_join or has_group) and line_count > 10:
+                        findings.append(("ℹ️ No WHERE clause",
+                            "No filter on JOINs/GROUP BY — may scan large tables unnecessarily."))
+                    if not has_star and not _DTA_RE_ALIAS.search(sql_clean):
+                        findings.append(("ℹ️ No column aliases",
+                            "No AS aliases found. Explicit aliases improve readability."))
+                    return {"can_simplify": can_simplify, "findings": findings}
+
+                _simplifiable, _flagged = [], []
+                for _v in dta_views:
+                    _res = _analyze_dt(_v.derived_table_sql)
+                    if _res["findings"]:
+                        _entry = {"view": _v, "can_simplify": _res["can_simplify"], "findings": _res["findings"]}
+                        (_simplifiable if _res["can_simplify"] else _flagged).append(_entry)
+                st.session_state[_dta_key] = {"simplifiable": _simplifiable, "flagged": _flagged}
+
+            # ── Render results if available ───────────────────────────
+            _cached = st.session_state.get(_dta_key)
+            if _cached:
+                _simplifiable = _cached["simplifiable"]
+                _flagged      = _cached["flagged"]
+                st.markdown(
+                    f"<div style='font-family:JetBrains Mono,monospace;font-size:12px;"
+                    f"color:#7B8FAE;margin-bottom:12px;'>"
+                    f"<b style='color:#4ade80;'>{len(_simplifiable)} simplifiable</b> · "
+                    f"<b style='color:#fbbf24;'>{len(_flagged)} with suggestions</b></div>",
+                    unsafe_allow_html=True)
+
+                if _simplifiable:
+                    st.markdown('<div class="section-header">💡 Can Be Simplified</div>', unsafe_allow_html=True)
+                    st.caption("Derived tables selecting from a single table with no transforms → use sql_table_name.")
+                    for _entry in _simplifiable:
+                        _v = _entry["view"]
+                        with st.expander(f"💡  {_v.name}   ({Path(_v.source_file).name if _v.source_file else '?'})"):
+                            for tag, msg in _entry["findings"]:
+                                st.markdown(f"**{tag}** — {msg}")
+                            st.code(_v.derived_table_sql, language="sql")
+
+                if _flagged:
+                    st.markdown('<div class="section-header">⚠️ Best Practice Suggestions</div>', unsafe_allow_html=True)
+                    st.caption("Derived tables with patterns that could be improved for performance or readability.")
+                    for _entry in _flagged:
+                        _v = _entry["view"]
+                        with st.expander(f"⚠️  {_v.name}   ({Path(_v.source_file).name if _v.source_file else '?'})"):
+                            for tag, msg in _entry["findings"]:
+                                st.markdown(f"**{tag}** — {msg}")
+                            st.code(_v.derived_table_sql, language="sql")
+
+                if not _simplifiable and not _flagged:
+                    st.success("✓ All derived tables look well-structured. No suggestions.")
 
 # ═══════════════════════════════════════════════════════════════
 # TAB 5 — File Viewer
