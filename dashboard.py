@@ -1397,7 +1397,14 @@ with tab_inv:
                     _edge_traces.append(go.Scatter(
                         x=[_col_x[1], _col_x[2]], y=[_bv_y, _jy],
                         mode="lines", hoverinfo="skip",
-                        line=dict(color=_jcolor + "88", width=2),
+                        line=dict(
+                            color="rgba({},{},{},0.53)".format(
+                                int(_jcolor[1:3], 16),
+                                int(_jcolor[3:5], 16),
+                                int(_jcolor[5:7], 16),
+                            ),
+                            width=2,
+                        ),
                     ))
                     # Edge label annotation
                     _annots.append(dict(
@@ -1406,7 +1413,11 @@ with tab_inv:
                         showarrow=False,
                         font=dict(family="JetBrains Mono", size=9, color=_jcolor),
                         bgcolor="rgba(15,22,40,0.82)",
-                        bordercolor=_jcolor + "55",
+                        bordercolor="rgba({},{},{},0.33)".format(
+                            int(_jcolor[1:3], 16),
+                            int(_jcolor[3:5], 16),
+                            int(_jcolor[5:7], 16),
+                        ),
                         borderwidth=1,
                         borderpad=3,
                     ))
