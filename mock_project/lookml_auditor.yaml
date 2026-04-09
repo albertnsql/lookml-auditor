@@ -6,15 +6,39 @@
 # suppress_checks: globally disables an entire check category.
 # suppress: suppresses individual issues by object name, glob pattern, or file.
 
-# Example: suppress field_documentation globally (too noisy in legacy folder)
+# ── Global suppressions (commented out — shown as examples) ──────────────────
 # suppress_checks:
-#   - field_documentation
+#   - field_documentation    # Too noisy in legacy folder
+#   - unused_views           # Not tracked project-wide yet
 
+# ── Per-object suppressions ───────────────────────────────────────────────────
 suppress:
-  # Suppress the duplicate sql_table_name warning for the known legacy overlap
+  # Known legacy overlap — orders_v1 is intentionally mapped to the same table
   - check: duplicate_tables
     object: "orders_v1"
 
-  # Suppress all checks for the legacy folder
-  # - file: "legacy_*.view.lkml"
-  #   check: "*"
+  # customers_pii is intentionally sharing the public.customers table
+  # It is a restricted view for compliance teams only
+  - check: duplicate_tables
+    object: "customers_pii"
+
+  # The ghost_explore intentionally references a non-existent view for testing
+  - check: missing_view
+    object: "ghost_explore"
+
+  # obsolete_inventory is a known orphan kept for historical reference
+  - check: unused_views
+    object: "obsolete_inventory"
+
+  # staging_temp is intentionally unreferenced — it is a developer scratch view
+  - check: unused_views
+    object: "staging_temp"
+
+# ── Per-file suppressions ─────────────────────────────────────────────────────
+# Suppress all checks on any file matching the legacy_ pattern
+# - file: "legacy_*.view.lkml"
+#   check: "*"
+
+# ── Notes ─────────────────────────────────────────────────────────────────────
+# All other issues in this mock_project are intentional and should be detected
+# by the auditor. Do NOT add suppressions without a documented reason above.
